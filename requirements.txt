@@ -1,0 +1,12 @@
+streamlit
+pandas
+plotly
+requests
+openpyxl
+st-gsheets-connection
+streamlit-autorefresh
+python-calamine
+oauth2client
+gspread
+pyarrow
+fastparquet
