@@ -2694,3 +2694,6 @@ def main() -> None:
             st.rerun()
 
 main()
+
+# 기존 코드 맨 마지막에 추가
+st.caption("copyright 신성우")
