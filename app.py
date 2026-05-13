@@ -2289,42 +2289,69 @@ def main() -> None:
                             "현재 선택한 매물을 보유한 부동산만 표시됩니다."
                         )
 
-                        # 대기중(위험) → 안전 순 정렬
+                        def _freq_sort_score(info: dict) -> int:
+                            freq = str(info.get("freq", ""))
+                            if "매일" in freq:
+                                return 5
+                            if "2일" in freq:
+                                return 4
+                            if "3~4일" in freq:
+                                return 3
+                            if "주 1~2회" in freq:
+                                return 2
+                            if "비정기" in freq:
+                                return 1
+                            return 0
+
                         sorted_targets = sorted(
-                            target_status.items(), key=lambda x: not x[1]["is_waiting"]
+                            target_status.items(),
+                            key=lambda x: (
+                                -_freq_sort_score(x[1]),
+                                not x[1].get("is_waiting"),
+                                str(x[1].get("display", "")),
+                            ),
                         )
 
-                        cols = st.columns(min(len(target_status), 4))
-                        col_idx = 0
-                        for r_uni, info in sorted_targets:
-                            if info.get("is_waiting"):
-                                _card_bg = "#eff6ff"
-                            elif info.get("is_done_today"):
-                                _card_bg = "#ecfdf5"
-                            else:
-                                _card_bg = "#f1f5f9"
-                            _title = info.get("display_short") or html.escape(
-                                str(info.get("display", ""))
-                            )
-                            _freq_e = html.escape(str(info.get("freq", "")))
-                            cols[col_idx % len(cols)].markdown(
-                                f"<div style='height:180px; overflow-y:hidden; display:flex; "
-                                f"flex-direction:column; justify-content:space-between; padding:15px; "
-                                f"border-radius:8px; border:1px solid #ddd; background-color:{_card_bg}; "
-                                f"margin-bottom:10px; box-sizing:border-box;'>"
-                                f"<div>"
-                                f"<div style='font-size:0.72rem; color:#64748b; margin-bottom:4px;'>"
-                                f"{html.escape(str(info['icon']))} {html.escape(str(info['type']))}</div>"
-                                f"<div style='font-weight:800; font-size:0.95rem; color:#1e293b; "
-                                f"line-height:1.25; margin-bottom:4px;'>{_title} "
-                                f"<span style='font-size:0.76rem; font-weight:500; color:#475569;'>"
-                                f"({_freq_e})</span></div>"
-                                f"</div>"
-                                f"<div style='font-size:0.86rem; line-height:1.35;'>{info['html']}</div>"
-                                f"</div>",
-                                unsafe_allow_html=True,
-                            )
-                            col_idx += 1
+                        def _render_competitor_cards(items: list[tuple[str, dict]]) -> None:
+                            if not items:
+                                return
+                            cols = st.columns(4)
+                            for col_idx, (_, info) in enumerate(items):
+                                if info.get("is_waiting"):
+                                    _card_bg = "#eff6ff"
+                                elif info.get("is_done_today"):
+                                    _card_bg = "#ecfdf5"
+                                else:
+                                    _card_bg = "#f1f5f9"
+                                _title = info.get("display_short") or html.escape(
+                                    str(info.get("display", ""))
+                                )
+                                _freq_e = html.escape(str(info.get("freq", "")))
+                                cols[col_idx % 4].markdown(
+                                    f"<div style='height:180px; overflow-y:hidden; display:flex; "
+                                    f"flex-direction:column; justify-content:space-between; padding:15px; "
+                                    f"border-radius:8px; border:1px solid #ddd; background-color:{_card_bg}; "
+                                    f"margin-bottom:10px; box-sizing:border-box;'>"
+                                    f"<div>"
+                                    f"<div style='font-size:0.72rem; color:#64748b; margin-bottom:4px;'>"
+                                    f"{html.escape(str(info['icon']))} {html.escape(str(info['type']))}</div>"
+                                    f"<div style='font-weight:800; font-size:0.95rem; color:#1e293b; "
+                                    f"line-height:1.25; margin-bottom:4px;'>{_title} "
+                                    f"<span style='font-size:0.76rem; font-weight:500; color:#475569;'>"
+                                    f"({_freq_e})</span></div>"
+                                    f"</div>"
+                                    f"<div style='font-size:0.86rem; line-height:1.35;'>{info['html']}</div>"
+                                    f"</div>",
+                                    unsafe_allow_html=True,
+                                )
+
+                        visible_targets = sorted_targets[:8]
+                        hidden_targets = sorted_targets[8:]
+                        _render_competitor_cards(visible_targets)
+
+                        if hidden_targets:
+                            with st.expander(f"더보기 ({len(hidden_targets)}곳)", expanded=False):
+                                _render_competitor_cards(hidden_targets)
             elif _raw_tracker_tasks:
                 st.markdown("---")
                 st.markdown(
