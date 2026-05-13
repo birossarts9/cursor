@@ -1728,8 +1728,69 @@ def main() -> None:
     )
     st.markdown("<br>", unsafe_allow_html=True)
 
-    query_params = st.query_params
-    user_id = query_params.get("id", "a123")
+    user_id = st.query_params.get("id")
+    if not user_id:
+        st.title("🚀 Top Rank AI: 압도적인 상위 노출 관리")
+        st.info(
+            "이 페이지는 **접속 ID가 없을 때** 보시는 홍보용 데모입니다. "
+            "아래 수치·차트는 **가상의 예시 데이터**이며, 서버 데이터 연산은 수행되지 않습니다."
+        )
+
+        k1, k2, k3 = st.columns(3)
+        with k1:
+            st.metric(
+                "평균 상위권 점유 시간",
+                "18.4시간",
+                delta="+2.1시간",
+                help="상단 노출 구간을 가중 평균한 데모 지표입니다.",
+            )
+        with k2:
+            st.metric(
+                "경쟁사 대비 노출 효율",
+                "127%",
+                delta="+12%p",
+                help="동일 단지·동일 시간대 기준 비교 예시입니다.",
+            )
+        with k3:
+            st.metric(
+                "갱신 비용 절감액 (추정)",
+                "월 340만원",
+                delta="-28만원",
+                delta_color="inverse",
+                help="수동 갱신 대비 자동화 시나리오 기준 예시입니다.",
+            )
+
+        st.subheader("시간대별 상단 점유율 (데모)")
+        _hours = [f"{h}시" for h in range(8, 21)]
+        _demo_occ = pd.DataFrame(
+            {
+                "우리 부동산": [52, 55, 61, 68, 74, 79, 82, 85, 88, 86, 80, 72, 65],
+                "경쟁사 A": [48, 50, 52, 54, 56, 55, 58, 57, 54, 52, 50, 48, 46],
+            },
+            index=_hours,
+        )
+        st.line_chart(_demo_occ)
+
+        st.subheader("주변 경쟁 매물 갱신 현황 (샘플)")
+        cc1, cc2, cc3, cc4 = st.columns(4)
+        _cards = [
+            ("한강베스트 공인중개사", "평균 갱신: **일 4.2회**"),
+            ("반포프라임 부동산", "평균 갱신: **일 3.6회**"),
+            ("강남센트럴 공인중개사", "평균 갱신: **일 5.1회**"),
+            ("역삼하이엔드 부동산", "평균 갱신: **일 3.9회**"),
+        ]
+        for _col, (_name, _freq) in zip((cc1, cc2, cc3, cc4), _cards):
+            with _col:
+                st.markdown(f"**{_name}**")
+                st.markdown(_freq)
+
+        st.markdown("---")
+        st.markdown(
+            "📩 **도입·데모 계정 문의:** 비즈니스 팀에 연락 주시면 실제 대시보드(ID 연동)와 "
+            "데이터 반영 범위를 안내해 드립니다."
+        )
+        st.stop()
+
     REALTOR_MAP = load_realtor_map()
     if user_id not in REALTOR_MAP:
         user_id = "demo"
