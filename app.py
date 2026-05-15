@@ -6,12 +6,15 @@
 from __future__ import annotations
 
 import base64
+import csv
 import html
 import os
 import time
 
 import re
 from datetime import datetime, timedelta, timezone
+
+import datetime as _std_datetime_module  # log_user_action용 표준 datetime 모듈
 
 import numpy as np
 import pandas as pd
@@ -34,6 +37,25 @@ from ranking_logic import (
 )
 
 _APP_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = _APP_DIR
+
+
+def log_user_action(action_detail: str) -> None:
+    """사용자의 행동을 activity_logs.csv에 기록하는 함수"""
+    client_id = st.query_params.get("id", "직접접속")
+    log_file = os.path.join(BASE_DIR, "activity_logs.csv")
+    now_str = _std_datetime_module.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    if not os.path.exists(log_file):
+        with open(log_file, mode="w", newline="", encoding="utf-8-sig") as f:
+            writer = csv.writer(f)
+            writer.writerow(["시간", "접속ID", "행동구분"])
+
+    with open(log_file, mode="a", newline="", encoding="utf-8-sig") as f:
+        writer = csv.writer(f)
+        writer.writerow([now_str, client_id, action_detail])
+
+
 # 엑셀 열 인덱스(0-based): N열 = CP사 — 멀티 CP 광고 핑퐁 노이즈 방지용 식별자
 COL_CP = 13
 
@@ -257,10 +279,23 @@ def _area_floor_compact_label(floor_type_text: str) -> str:
     return ft
 
 
+def _extract_direction_text(*values) -> str:
+    """방향 컬럼이 비어 있거나 없을 때 층/타입 텍스트에서 방향을 추출."""
+    direction_re = re.compile(r"(남동향|남서향|북동향|북서향|동향|서향|남향|북향)")
+    for value in values:
+        s = str(value or "").strip()
+        if not s or s.lower() in {"nan", "none", "nat", "미상"}:
+            continue
+        m = direction_re.search(s)
+        if m:
+            return m.group(1)
+    return ""
+
+
 def _task_label_from_spec(
-    danji: str, dongho: str, floor_type: str, price=None
+    danji: str, dongho: str, floor_type: str, price=None, direction: str = ""
 ) -> str:
-    """타임라인·액션표 공통: `동/호수 (면적·층수 | 가격)` (단지명은 동/호수 중복 시에만 제거)."""
+    """타임라인·액션표 공통: `동/호수 (면적·층수 | 가격) 방향`."""
     dong_c = _strip_danji_from_dongho(danji, dongho)
     if not dong_c:
         dong_c = "—"
@@ -270,7 +305,71 @@ def _task_label_from_spec(
     ptxt = _fmt_price_kr(price)
     if not ptxt:
         ptxt = "—"
-    return f"{dong_c} ({mid} | {ptxt})"
+    direction_txt = str(direction or "").strip()
+    if not direction_txt:
+        direction_txt = _extract_direction_text(floor_type)
+    if not direction_txt:
+        direction_txt = "—"
+    return f"{dong_c} ({mid} | {ptxt}) {direction_txt}"
+
+
+def _ensure_direction_and_tracking_key(df: pd.DataFrame) -> pd.DataFrame:
+    """방향을 명시 컬럼으로 표준화하고 매물묶음키 끝에 포함해 병합 충돌을 방지."""
+    out = df.copy()
+    if "방향" not in out.columns:
+        out["방향"] = ""
+    out["방향"] = out["방향"].fillna("").astype(str).str.strip()
+    if "층/타입" in out.columns:
+        extracted = out["층/타입"].map(_extract_direction_text)
+        out["방향"] = out["방향"].where(out["방향"].astype(bool), extracted)
+    out["방향"] = out["방향"].fillna("").astype(str).str.strip()
+
+    if "매물묶음키" in out.columns:
+        bkey = out["매물묶음키"].fillna("").astype(str).str.strip()
+        direction = out["방향"].fillna("").astype(str).str.strip()
+        has_direction = pd.Series(
+            [bool(d) and d in str(k) for k, d in zip(bkey, direction)],
+            index=out.index,
+        )
+        needs_direction = direction.astype(bool) & ~has_direction
+        out.loc[needs_direction, "매물묶음키"] = (
+            bkey.loc[needs_direction] + " | " + direction.loc[needs_direction]
+        )
+    return out
+
+
+def _drop_standalone_listings(df: pd.DataFrame) -> pd.DataFrame:
+    """경쟁 부동산이 없는 단독 매물을 타임라인/분석 전체에서 제외."""
+    if df.empty or "매물묶음키" not in df.columns:
+        return df
+
+    out = df.copy()
+    standalone = pd.Series(False, index=out.index)
+    if "노출형태" in out.columns:
+        exposure = out["노출형태"].fillna("").astype(str).str.strip()
+        standalone |= exposure.str.contains("단독", na=False)
+    if "단독매물" in out.columns:
+        solo = out["단독매물"].fillna("").astype(str).str.strip().str.lower()
+        standalone |= solo.isin({"1", "true", "y", "yes", "단독", "단독매물"})
+    if "묶음내순위" in out.columns:
+        standalone |= out["묶음내순위"].fillna("").astype(str).str.contains("단독", na=False)
+
+    if "부동산명" in out.columns:
+        realtor_key = out["부동산명"].map(clean_realtor_name)
+        seller_counts = realtor_key.groupby(out["매물묶음키"], dropna=False).transform("nunique")
+        standalone |= seller_counts <= 1
+
+    before = len(out)
+    out = out.loc[~standalone].copy()
+    dropped = before - len(out)
+    if dropped:
+        print(f"[INFO] 단독 매물 제외: {dropped:,}행")
+    return out
+
+
+def _prepare_listing_identity(df: pd.DataFrame) -> pd.DataFrame:
+    """분석 전 공통 식별키 보정: 방향 포함 + 단독 매물 제거."""
+    return _drop_standalone_listings(_ensure_direction_and_tracking_key(df))
 
 
 def _parse_ai_rec_ts(day_start: pd.Timestamp, advice: str) -> pd.Timestamp | None:
@@ -369,6 +468,23 @@ def _parse_ai_primary_time(ai_msg: str) -> tuple[int, int] | None:
     if 0 <= h <= 23 and 0 <= mi <= 59:
         return h, mi
     return None
+
+
+def _format_ai_recommendation_summary(ai_msg: str) -> str:
+    """요약 행 col3용 — `AI 💡 1순위: HH:MM / 2순위: HH:MM` 형식."""
+    s = (ai_msg or "").strip()
+    if not s:
+        return "AI · 추천 시각 확인 중"
+    m1 = re.search(r"1순위[^\d]*(\d{1,2}):(\d{2})", s)
+    m2 = re.search(r"2순위[^\d]*(\d{1,2}):(\d{2})", s)
+    if m1 and m2:
+        t1 = f"{int(m1.group(1)):02d}:{m1.group(2)}"
+        t2 = f"{int(m2.group(1)):02d}:{m2.group(2)}"
+        return f"AI 💡 1순위: {t1} / 2순위: {t2}"
+    if m1:
+        return f"AI 💡 1순위: {int(m1.group(1)):02d}:{m1.group(2)}"
+    compact = re.sub(r"\s*\([^)]*\)", "", s).replace("💡", "").strip()
+    return f"AI {compact}" if compact else "AI · 추천 시각 확인 중"
 
 
 # Mix Engine 임계치
@@ -515,68 +631,184 @@ def _render_action_card(
     """통합 액션 카드 — 실시간 경쟁사 상태를 최우선으로 렌더."""
     if total_watch <= 0:
         title = "✅ 자유 갱신"
-        palette = {
-            "bg": "linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)",
-            "border": "#10b981",
-            "accent": "#047857",
-            "text": "#065f46",
-        }
+        palette = {"bg": "#FFFFFF", "border": "#25B196", "text": "#1A7F6C"}
         summary_text = "현재 화면에서 집계된 경쟁 감시 대상이 없습니다. 원하시는 시각에 자유롭게 갱신하셔도 됩니다."
     elif waiting_watch > 0:
         title = "🛑 대기 권장 (적군 활동 중)"
-        palette = {
-            "bg": "linear-gradient(135deg, #fff1f2 0%, #ffe4e6 100%)",
-            "border": "#ef4444",
-            "accent": "#b91c1c",
-            "text": "#9f1239",
-        }
-        summary_text = (
-            f"현재 감시 중인 총 {total_watch}곳 중 {waiting_watch}곳이 아직 갱신 대기 중입니다."
-        )
+        palette = {"bg": "#FFFFFF", "border": "#E11D48", "text": "#9F1239"}
+        summary_text = f"현재 감시 중인 총 {total_watch}곳 중 {waiting_watch}곳이 아직 갱신 대기 중입니다."
     else:
         title = "🚀 즉시 타격 (경쟁사 활동 종료)"
-        palette = {
-            "bg": "linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)",
-            "border": "#2563eb",
-            "accent": "#1d4ed8",
-            "text": "#1e3a8a",
-        }
-        summary_text = (
-            f"감시 중인 {total_watch}곳이 모두 오늘 갱신을 마쳤습니다. 지금이 가장 안전한 타점입니다."
-        )
+        palette = {"bg": "#FFFFFF", "border": "#185294", "text": "#113A6A"}
+        summary_text = f"감시 중인 {total_watch}곳이 모두 오늘 갱신을 마쳤습니다. 지금이 가장 안전한 타점입니다."
 
     raw_ai = (ai_msg or "").strip()
     ai_html = html.escape(raw_ai) if raw_ai else "AI 추천 문구를 확인 중입니다."
     ai_block = (
-        "<div style='margin-top:14px; font-size:0.84rem; color:#94a3b8; line-height:1.5;'>"
-        "<span style='font-weight:700;'>[과거 데이터 기반 AI 참고 타점]</span> "
+        "<div style='margin-top:12px; font-size:0.85rem; color:#64748B; line-height:1.5;'>"
+        "<span style='font-weight:700; color:#475569;'>[AI 타점 분석]</span> "
         f"<span style='font-weight:500;'>{ai_html}</span>"
         "</div>"
     )
 
     st.markdown(
         f"""
-<div style="
-  background: {palette['bg']};
-  border: 2px solid {palette['border']};
-  border-left: 10px solid {palette['border']};
-  border-radius: 14px;
-  padding: 22px 26px;
-  margin: 18px 0 16px 0;
-  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
-  font-family: inherit;
-">
-  <div style="font-size: 1.55rem; font-weight: 900; color: {palette['accent']}; letter-spacing: -0.02em; line-height: 1.25;">
-    {title}
-  </div>
-  <div style="font-size: 1.08rem; color: {palette['text']}; margin-top: 12px; line-height: 1.52; font-weight: 700;">
-    {html.escape(summary_text)}
-  </div>
-  {ai_block}
-</div>
-""",
+        <div style="background: {palette['bg']}; border: 1px solid #E2E8F0; border-left: 6px solid {palette['border']}; border-radius: 8px; padding: 20px 24px; margin: 16px 0; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02); font-family: inherit;">
+          <div style="font-size: 1.35rem; font-weight: 800; color: {palette['border']}; letter-spacing: -0.02em; line-height: 1.25;">{title}</div>
+          <div style="font-size: 1.05rem; color: {palette['text']}; margin-top: 8px; line-height: 1.5; font-weight: 600;">{html.escape(summary_text)}</div>
+          {ai_block}
+        </div>
+        """,
         unsafe_allow_html=True,
     )
+
+
+def _renewal_events_28d_for_task(task: str, td: pd.DataFrame, today_d: datetime.date) -> int:
+    if td.empty or "Task" not in td.columns:
+        return 0
+    sub = td[td["Task"] == task].copy()
+    if sub.empty:
+        return 0
+    sub["_ts"] = pd.to_datetime(sub["수집일시"], errors="coerce")
+    sub = sub[sub["_ts"].notna()]
+    start_d = today_d - timedelta(days=27)
+    sub = sub[sub["_ts"].dt.date >= start_d]
+    if sub.empty:
+        return 0
+    dedup_cols = [c for c in ("매물묶음키", "수집일시", "확인일자") if c in sub.columns]
+    if dedup_cols:
+        return len(sub.drop_duplicates(subset=dedup_cols))
+    return len(sub.drop_duplicates(subset=["수집일시"]))
+
+
+def _action_urgency_rank(action: dict) -> int:
+    """긴급도 정렬: 🚀(STRIKE) → 🛑(WAIT) → ✅(FREE)."""
+    return {"STRIKE": 0, "WAIT": 1, "FREE": 2}.get(str(action.get("status", "")), 9)
+
+
+_TASK_SORT_OPTIONS = ("이름 오름차순", "광고 횟수 내림차순")
+
+
+def _dong_ho_sort_key(task: str) -> str:
+    """Task 라벨에서 동/호수(앞부분) 추출 — 이름 정렬용."""
+    s = str(task).strip()
+    if "(" in s:
+        s = s.split("(", 1)[0].strip()
+    return s
+
+
+def _task_ad_freq_in_action_df(task: str, action_df: pd.DataFrame) -> int:
+    """action_df에서 해당 Task의 실제 '광고 갱신 횟수' 값을 찾아 반환."""
+    if action_df is None or action_df.empty or "Task" not in action_df.columns:
+        return 0
+
+    t_clean = str(task).replace(" ", "")
+    mask = action_df["Task"].astype(str).str.replace(" ", "") == t_clean
+
+    if mask.any():
+        if "광고 갱신 횟수" in action_df.columns:
+            val = action_df.loc[mask, "광고 갱신 횟수"].iloc[0]
+            try:
+                return int(pd.to_numeric(val, errors="coerce"))
+            except (ValueError, TypeError):
+                return 0
+    return 0
+
+
+def _sort_tracking_tasks(
+    tasks: list,
+    action_df: pd.DataFrame,
+    sort_mode: str,
+) -> list[str]:
+    """tracking Task 목록 정렬 — 기본은 이름(동/호) 오름차순."""
+    items = [str(t) for t in tasks if str(t).strip()]
+    if sort_mode == "이름 오름차순":
+        return sorted(items, key=_dong_ho_sort_key, reverse=False)
+    return sorted(
+        items,
+        key=lambda t: (-_task_ad_freq_in_action_df(t, action_df), _dong_ho_sort_key(t)),
+    )
+
+
+def _render_tracking_tab_header(title_html: str, *, widget_key: str) -> str:
+    """탭 제목(좌) + 정렬 셀렉트(우). 세션 `tl_task_sort`로 탭 간 동기화."""
+    if "tl_task_sort" not in st.session_state:
+        st.session_state.tl_task_sort = _TASK_SORT_OPTIONS[0]
+    hdr_l, hdr_r = st.columns([3, 1])
+    with hdr_l:
+        st.markdown(title_html, unsafe_allow_html=True)
+    with hdr_r:
+        cur = st.session_state.tl_task_sort
+        idx = list(_TASK_SORT_OPTIONS).index(cur) if cur in _TASK_SORT_OPTIONS else 0
+        picked = st.selectbox(
+            "정렬 기준",
+            list(_TASK_SORT_OPTIONS),
+            index=idx,
+            key=widget_key,
+        )
+        st.session_state.tl_task_sort = picked
+    return str(st.session_state.tl_task_sort)
+
+
+def _status_badge_from_action(action: dict) -> tuple[str, str]:
+    """(표시 라벨, 포인트 컬러)"""
+    st_code = str(action.get("status", "FREE"))
+    if st_code == "STRIKE":
+        return "🚀 즉시 타격", "#185294"
+    if st_code == "WAIT":
+        return "🛑 대기 권장", "#E11D48"
+    return "✅ 자유 갱신", "#25B196"
+
+
+def _command_summary_cell(text: str, *, accent: str | None = None) -> None:
+    """요약 행 셀 — 이미지와 동일한 카드형 박스, 일반 굵기(400)."""
+    border_left = f"border-left:4px solid {accent};" if accent else ""
+    st.markdown(
+        f"<div style='background:#FFFFFF;border:1px solid #E2E8F0;{border_left}"
+        f"border-radius:8px;padding:12px 14px;min-height:52px;"
+        f"display:flex;align-items:center;font-size:1rem;font-weight:400;"
+        f"color:#0F172A;line-height:1.45;word-break:break-word;'>"
+        f"{html.escape(text)}</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _command_summary_cell_ai(summary: str) -> None:
+    """요약 행 col3 — AI 접두어만 포인트 컬러, 본문은 일반체."""
+    body = summary[3:].strip() if summary.startswith("AI") else summary
+    st.markdown(
+        "<div style='background:#FFFFFF;border:1px solid #E2E8F0;border-radius:8px;"
+        "padding:12px 14px;min-height:52px;display:flex;align-items:center;"
+        "font-size:1rem;font-weight:400;color:#0F172A;line-height:1.45;word-break:break-word;'>"
+        "<span style='color:#1E3A8A;font-weight:400'>AI</span> "
+        f"{html.escape(body)}</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _render_command_summary_row(
+    task: str,
+    target_status: dict,
+    *,
+    status_label: str,
+    status_accent: str,
+    ai_summary: str,
+    expander_key: str,
+) -> None:
+    """요약 행(상태|매물|AI) 3컬럼 + 하단 상세보기 익스팬더."""
+    col1, col2, col3 = st.columns([1, 1.5, 2.0])
+    with col1:
+        _command_summary_cell(status_label, accent=status_accent)
+    with col2:
+        _command_summary_cell(str(task))
+    with col3:
+        _command_summary_cell_ai(ai_summary)
+
+    st.markdown("<div style='height:5px;margin:0;padding:0;'></div>", unsafe_allow_html=True)
+    with st.expander("상세보기", expanded=False, key=expander_key):
+        _render_competitor_watch_section(task, target_status)
+
+    st.write("")
 
 
 def _find_action_row_for_task(task: str, action_df: pd.DataFrame) -> pd.Series | None:
@@ -594,11 +826,246 @@ def _find_action_row_for_task(task: str, action_df: pd.DataFrame) -> pd.Series |
     if "매물명" in action_df.columns:
         for _, row in action_df.iterrows():
             mn = str(row.get("매물명", "")).replace(" ", "")
-            # 매물명 텍스트 내에 Task 문자열이 '완벽히' 포함될 때만 매칭
             if t_nospace in mn:
                 return row
 
     return None
+
+
+
+def _build_target_status_for_task(
+    sel_task: str,
+    t_df: pd.DataFrame,
+    complex_data: dict,
+    comp_df: pd.DataFrame,
+    *,
+    kst_now: pd.Timestamp,
+    kst_today: datetime.date,
+    my_unified: str,
+    is_demo_mode: bool,
+    is_unauth_demo: bool,
+    filter_realtor_name: str,
+    display_realtor: str,
+) -> dict:
+    """선택 매물 기준 경쟁사 감시 상태 dict (Live Tracker와 동일 로직)."""
+    sub_df = t_df[t_df["Task"] == sel_task].copy()
+    target_status: dict = {}
+    if sub_df.empty:
+        return target_status
+
+    b_df = complex_data.get("boosted")
+    if b_df is not None and not b_df.empty:
+        b_df = b_df.copy()
+        b_df["수집일시"] = pd.to_datetime(b_df["수집일시"], errors="coerce")
+        if "부동산명_정제" not in b_df.columns:
+            b_df["부동산명_정제"] = b_df["부동산명"].apply(clean_realtor_name)
+        today_renewed = b_df[b_df["수집일시"].dt.date == kst_today]["부동산명_정제"].unique().tolist()
+        b_freq = b_df.dropna(subset=["수집일시"])
+        analysis_days = max(
+            1,
+            (b_freq["수집일시"].max().date() - b_freq["수집일시"].min().date()).days + 1,
+        )
+        renew_counts = b_freq.groupby("부동산명_정제", dropna=False).size()
+        high_freq_unified = [r for r, cnt in renew_counts.items() if (analysis_days / cnt) <= 4.0]
+    else:
+        today_renewed = []
+        high_freq_unified = []
+
+    latest_ranks = sub_df.groupby("부동산명_통합")["묶음내순위_숫자"].last().reset_index()
+    latest_ranks["묶음내순위_숫자"] = (
+        pd.to_numeric(latest_ranks["묶음내순위_숫자"], errors="coerce").fillna(999)
+    )
+    top3_unified = latest_ranks[latest_ranks["묶음내순위_숫자"] <= 3]["부동산명_통합"].tolist()
+    sub_realtors = sub_df["부동산명_통합"].unique().tolist()
+    high_freq_unified = [r for r in high_freq_unified if r in sub_realtors]
+
+    for r_uni in set(top3_unified + high_freq_unified):
+        if r_uni == my_unified:
+            continue
+        r_original_series = sub_df[sub_df["부동산명_통합"] == r_uni]["부동산명"]
+        if r_original_series.empty:
+            continue
+        r_original = r_original_series.iloc[-1]
+        r_disp = mask_text(
+            r_original,
+            is_demo=is_demo_mode,
+            filter_realtor_name=filter_realtor_name,
+            display_realtor=display_realtor,
+        )
+        r_disp_short = html.escape(_strip_realtor_label_noise(r_disp))
+        is_today = r_uni in today_renewed
+        last_active_hhmm = _last_renewal_hhmm_today(
+            r_uni, kst_today, b_df if b_df is not None else None, sub_df
+        )
+        peak_usual = "패턴 불규칙"
+        peak_today_wd = "-"
+        wd_group = ""
+        deadline = 18
+        freq_str = "갱신 패턴 산출 전"
+        weekday_real = True
+        if not comp_df.empty and "부동산명" in comp_df.columns:
+            comp_match = comp_df.copy()
+            comp_match["부동산명_통합"] = comp_match["부동산명"].apply(clean_realtor_name)
+            cm = comp_match.loc[comp_match["부동산명_통합"] == r_uni]
+            if not cm.empty:
+                row0 = cm.iloc[0]
+                if "갱신빈도" in cm.columns:
+                    fv = row0.get("갱신빈도")
+                    if pd.notna(fv) and str(fv).strip():
+                        freq_str = str(fv)
+                if "주력 갱신 시간" in cm.columns and pd.notna(row0.get("주력 갱신 시간")):
+                    peak_usual = str(row0["주력 갱신 시간"])
+                if "오늘 요일 주력 시간" in cm.columns and pd.notna(row0.get("오늘 요일 주력 시간")):
+                    peak_today_wd = str(row0["오늘 요일 주력 시간"])
+                if "오늘_요일_그룹" in cm.columns and pd.notna(row0.get("오늘_요일_그룹")):
+                    wd_group = str(row0["오늘_요일_그룹"])
+                if "오늘 요일 마지노선" in cm.columns:
+                    try:
+                        deadline = int(float(row0["오늘 요일 마지노선"]))
+                    except (TypeError, ValueError):
+                        deadline = 18
+                if "오늘요일_실측" in cm.columns:
+                    _wr = row0.get("오늘요일_실측")
+                    weekday_real = True if pd.isna(_wr) else bool(_wr)
+        now_hour = kst_now.hour
+        _bad_peak = ("-", "패턴 불규칙", "", "nan")
+        peak_usual_n = str(peak_usual).strip()
+        peak_today_n = str(peak_today_wd).strip()
+        if peak_today_n.lower() in ("nan", "none"):
+            peak_today_n = "-"
+        wd_disp = wd_group if wd_group else ""
+        if not weekday_real and wd_disp:
+            if peak_usual_n not in _bad_peak:
+                pattern_desc = f"{wd_disp} 패턴: 데이터 없음 (전체 기준 {peak_usual_n})"
+            else:
+                pattern_desc = f"{wd_disp} 패턴: 데이터 없음 (평일 기준 분석)"
+        elif peak_usual_n in _bad_peak or peak_today_n in _bad_peak:
+            pattern_desc = "패턴 데이터 부족"
+        elif peak_usual_n == peak_today_n:
+            pattern_desc = f"평소처럼 {peak_today_n}에 집중합니다"
+        else:
+            wg = f"{wd_disp} " if wd_disp else ""
+            pattern_desc = f"평소 {peak_usual_n} ➔ {wg}{peak_today_n} 위주"
+        _gray = "color:#64748b;font-size:0.9rem;"
+        _small = "color:#94a3b8;font-size:0.8rem;"
+        if is_today:
+            state_html = (
+                f"<b>🟢 오늘 광고 완료 ({last_active_hhmm} 진행)</b>"
+                f"<br><span style='{_gray}'>{html.escape(pattern_desc)}</span>"
+                f"<br><span style='{_small}'>마지노선: {deadline}시</span>"
+            )
+            is_waiting = False
+        elif now_hour < deadline:
+            state_html = (
+                f"<b>🔴 아직 활동 전 (주의)</b>"
+                f"<br><span style='{_gray}'>{html.escape(pattern_desc)}</span>"
+                f"<br><span style='{_small}'>마지노선: {deadline}시 (이후 안전)</span>"
+            )
+            is_waiting = True
+        else:
+            state_html = (
+                f"<b><span style='color:#3B82F6;'>🔵 활동 없음 (마지노선 경과)</span></b>"
+                f"<br><span style='{_gray}'>{html.escape(pattern_desc)}</span>"
+                f"<br><span style='{_small}'>마지노선 {deadline}시 경과</span>"
+            )
+            is_waiting = False
+        if r_uni in top3_unified:
+            target_status[r_uni] = {
+                "display": r_disp,
+                "display_short": r_disp_short,
+                "freq": freq_str,
+                "icon": "👑",
+                "html": state_html,
+                "is_waiting": is_waiting,
+                "is_done_today": is_today,
+                "last_active_time": last_active_hhmm,
+                "type": "상위권 방어조",
+            }
+        else:
+            target_status[r_uni] = {
+                "display": r_disp,
+                "display_short": r_disp_short,
+                "freq": freq_str,
+                "icon": "🔥",
+                "html": state_html,
+                "is_waiting": is_waiting,
+                "is_done_today": is_today,
+                "last_active_time": last_active_hhmm,
+                "type": "고빈도 추격조",
+            }
+    if is_unauth_demo and target_status:
+        _apply_unauth_demo_watch_target_overrides(target_status)
+    return target_status
+
+
+def _render_competitor_watch_section(sel_task: str, target_status: dict) -> None:
+    """👁️ 감시 중인 경쟁사 상세 카드 섹션."""
+    if not target_status:
+        return
+    st.markdown(
+        f"👁️ 감시 중인 경쟁사 상세 "
+        f"({html.escape(str(sel_task))} 기준 · {len(target_status)}곳)"
+    )
+    st.caption(
+        "※ 광고 여부는 단지 전체 기준으로 감시하며, "
+        "현재 선택한 매물을 보유한 부동산만 표시됩니다."
+    )
+
+    def _freq_sort_score(info: dict) -> int:
+        freq = str(info.get("freq", ""))
+        if "매일" in freq:
+            return 5
+        if "2일" in freq:
+            return 4
+        if "3~4일" in freq:
+            return 3
+        if "주 1~2회" in freq:
+            return 2
+        if "비정기" in freq:
+            return 1
+        return 0
+
+    sorted_targets = sorted(
+        target_status.items(),
+        key=lambda x: (
+            -_freq_sort_score(x[1]),
+            not x[1].get("is_waiting"),
+            str(x[1].get("display", "")),
+        ),
+    )
+
+    def _render_competitor_cards(items: list[tuple[str, dict]]) -> None:
+        if not items:
+            return
+        cols = st.columns(4)
+        for col_idx, (_, info) in enumerate(items):
+            _card_bg = "#FFFFFF"
+            _title = info.get("display_short") or html.escape(str(info.get("display", "")))
+            _freq_e = html.escape(str(info.get("freq", "")))
+            cols[col_idx % 4].markdown(
+                f"<div style='height:180px; overflow-y:hidden; display:flex; "
+                f"flex-direction:column; justify-content:space-between; padding:15px; "
+                f"border-radius:8px; border:1px solid #E2E8F0; background-color:{_card_bg}; "
+                f"box-shadow: 0 1px 2px rgba(0,0,0,0.02); margin-bottom:10px; box-sizing:border-box;'>"
+                f"<div>"
+                f"<div style='font-size:0.72rem; color:#64748b; margin-bottom:4px;'>"
+                f"{html.escape(str(info['icon']))} {html.escape(str(info['type']))}</div>"
+                f"<div style='font-weight:800; font-size:0.95rem; color:#1e293b; "
+                f"line-height:1.25; margin-bottom:4px;'>{_title} "
+                f"<span style='font-size:0.76rem; font-weight:500; color:#475569;'>"
+                f"({_freq_e})</span></div>"
+                f"</div>"
+                f"<div style='font-size:0.86rem; line-height:1.35;'>{info['html']}</div>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+
+    visible_targets = sorted_targets[:8]
+    hidden_targets = sorted_targets[8:]
+    _render_competitor_cards(visible_targets)
+    if hidden_targets:
+        with st.expander(f"더보기 ({len(hidden_targets)}곳)", expanded=False):
+            _render_competitor_cards(hidden_targets)
 
 
 def _friendly_hover_state_label(state: str) -> str:
@@ -930,6 +1397,9 @@ def _build_timeline_from_hist(
     spec_src = my_hist.sort_values("수집일시").copy()
     spec_src["동/호수"] = spec_src["동/호수"].astype(str).str.strip()
     spec_src["층/타입"] = spec_src["층/타입"].astype(str).str.strip()
+    if "방향" not in spec_src.columns:
+        spec_src["방향"] = ""
+    spec_src["방향"] = spec_src["방향"].fillna("").astype(str).str.strip()
     rows_spec = []
     for bkey, grp in spec_src.groupby("매물묶음키", dropna=False):
 
@@ -945,6 +1415,7 @@ def _build_timeline_from_hist(
                 "동/호수": _last_non_empty(grp["동/호수"]),
                 "층/타입": _dedup_floor_type_text(_last_non_empty(grp["층/타입"])),
                 "가격": g_price,
+                "방향": _last_non_empty(grp["방향"]) or _extract_direction_text(_last_non_empty(grp["층/타입"])),
             }
         )
     spec_df = pd.DataFrame(rows_spec)
@@ -953,9 +1424,7 @@ def _build_timeline_from_hist(
     now_kst = _now_kst_naive()
     tl["Start"] = pd.to_datetime(tl["수집일시"], errors="coerce")
     raw_next = pd.to_datetime(tl["다음수집일시"], errors="coerce")
-    end_cap = now_kst
-    if pd.notna(batch_end_ts):
-        end_cap = max(batch_end_ts, now_kst)
+    end_cap = batch_end_ts if pd.notna(batch_end_ts) else now_kst
     tl["Finish"] = raw_next.fillna(end_cap)
     tl["Finish"] = pd.to_datetime(tl["Finish"], errors="coerce")
     bad = tl["Finish"].isna() | (tl["Finish"] <= tl["Start"])
@@ -967,12 +1436,13 @@ def _build_timeline_from_hist(
         tl["가격"] = tl["가격"].fillna("")
 
     tl["Task"] = [
-        _task_label_from_spec(d, dh, ft, _scalar_price_str(pr))
-        for d, dh, ft, pr in zip(
+        _task_label_from_spec(d, dh, ft, _scalar_price_str(pr), direction)
+        for d, dh, ft, pr, direction in zip(
             tl["단지명"].tolist(),
             tl["동/호수"].tolist(),
             tl["층/타입"].tolist(),
             tl["가격"].tolist(),
+            tl.get("방향", pd.Series([""] * len(tl), index=tl.index)).tolist(),
         )
     ]
 
@@ -999,8 +1469,8 @@ def _build_prime_action_df(
     """
     app.py 마스터 대시보드와 동일한 merge_asof / death_ts 기반 action_df + hist_base 기반 timeline_df.
     """
-    t_work = trk.copy()
-    b_work = boosted_df.copy()
+    t_work = _ensure_direction_and_tracking_key(trk)
+    b_work = _ensure_direction_and_tracking_key(boosted_df)
     t_work["수집일시"] = pd.to_datetime(t_work["수집일시"], errors="coerce")
     b_work["수집일시"] = pd.to_datetime(b_work["수집일시"], errors="coerce")
     ref_ts = b_work["수집일시"].max()
@@ -1018,16 +1488,29 @@ def _build_prime_action_df(
         return _empty_action_df(), _empty_timeline_df()
 
     key_cols = ["매물묶음키", "부동산명_통합"]
-    latest_ts = b_work["수집일시"].max()
+    if "방향" not in key_cols:
+        key_cols.append("방향")
+    latest_ts = t_work["수집일시"].max()
     if pd.isna(latest_ts):
         return _empty_action_df(), _empty_timeline_df()
 
-    batch_end_ts = latest_ts.normalize() + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+    batch_end_ts = latest_ts
     evt_cols = key_cols + ["수집일시"]
 
-    hist_cols = key_cols + ["수집일시", "묶음내순위_숫자", "전체순위_숫자", "노출형태"]
+    hist_cols = list(
+        dict.fromkeys(
+            key_cols + ["수집일시", "묶음내순위_숫자", "전체순위_숫자", "노출형태", "방향"]
+        )
+    )
     hist_base = (
         t_work[hist_cols].dropna(subset=evt_cols).sort_values(key_cols + ["수집일시"]).copy()
+    )
+    hist_base["_rank_for_dedup"] = pd.to_numeric(hist_base["묶음내순위_숫자"], errors="coerce").fillna(999)
+    hist_base = (
+        hist_base.sort_values(key_cols + ["수집일시", "_rank_for_dedup"], kind="mergesort")
+        .drop_duplicates(subset=key_cols + ["수집일시"], keep="first")
+        .drop(columns=["_rank_for_dedup"])
+        .copy()
     )
     valid_ranks = t_work[t_work["묶음내순위_숫자"] < 999]
     global_b_counts = valid_ranks.groupby("매물묶음키")["묶음내순위_숫자"].max()
@@ -1059,15 +1542,7 @@ def _build_prime_action_df(
             key_cols + ["death_ts"], na_position="last", kind="mergesort"
         ).reset_index(drop=True)
 
-    last_rows = hist_base_real.groupby(key_cols, dropna=False).tail(1)
-    defense_mask = last_rows["is_top_tier"].fillna(False)
-    if defense_mask.any():
-        synthetic_rows = last_rows.loc[defense_mask].copy()
-        synthetic_rows["수집일시"] = batch_end_ts
-        synthetic_rows["is_top_tier"] = False
-        hist_base = pd.concat([hist_base_real, synthetic_rows], ignore_index=True)
-    else:
-        hist_base = hist_base_real
+    hist_base = hist_base_real
     hist_base = hist_base.sort_values(key_cols + ["수집일시"]).copy()
 
     hist_base["다음수집일시"] = hist_base.groupby(key_cols, dropna=False)["수집일시"].shift(-1)
@@ -1102,6 +1577,14 @@ def _build_prime_action_df(
 
     all_evt = b_work.dropna(subset=evt_cols).sort_values(key_cols + ["수집일시"]).copy()
     all_evt["수집일시"] = pd.to_datetime(all_evt["수집일시"], errors="coerce")
+    if "묶음내순위_숫자" in all_evt.columns:
+        all_evt["_rank_for_dedup"] = pd.to_numeric(all_evt["묶음내순위_숫자"], errors="coerce").fillna(999)
+        all_evt = (
+            all_evt.sort_values(key_cols + ["수집일시", "_rank_for_dedup"], kind="mergesort")
+            .drop_duplicates(subset=key_cols + ["수집일시"], keep="first")
+            .drop(columns=["_rank_for_dedup"])
+            .copy()
+        )
     all_evt["next_event_time"] = all_evt.groupby(key_cols)["수집일시"].shift(-1)
     all_evt["batch_end_ts"] = batch_end_ts
 
@@ -1123,6 +1606,8 @@ def _build_prime_action_df(
         right_df = death_points.sort_values("death_ts", na_position="last", kind="mergesort").reset_index(
             drop=True
         )
+        left_df["수집일시"] = left_df["수집일시"].astype("datetime64[ns]")
+        right_df["death_ts"] = right_df["death_ts"].astype("datetime64[ns]")
         all_evt = pd.merge_asof(
             left_df,
             right_df,
@@ -1165,6 +1650,8 @@ def _build_prime_action_df(
     _hist_end = _hist_end.dropna(subset=["end_point_ts"]).copy()
     left_df = all_evt.sort_values("effective_end_ts", na_position="last", kind="mergesort").reset_index(drop=True)
     right_df = _hist_end.sort_values("end_point_ts", na_position="last", kind="mergesort").reset_index(drop=True)
+    left_df["effective_end_ts"] = left_df["effective_end_ts"].astype("datetime64[ns]")
+    right_df["end_point_ts"] = right_df["end_point_ts"].astype("datetime64[ns]")
     all_evt = pd.merge_asof(
         left_df,
         right_df,
@@ -1266,7 +1753,7 @@ def _build_prime_action_df(
 
     latest_my = my_hist.sort_values("수집일시").drop_duplicates("매물묶음키", keep="last")
     spec_src = my_hist.sort_values("수집일시").copy()
-    for c in ["단지명", "동/호수", "층/타입", "거래방식", "가격"]:
+    for c in ["단지명", "동/호수", "층/타입", "거래방식", "가격", "방향"]:
         if c not in spec_src.columns:
             spec_src[c] = ""
         spec_src[c] = (
@@ -1276,7 +1763,7 @@ def _build_prime_action_df(
             .replace({"nan": "", "None": "", "": pd.NA})
         )
     spec_grouped = spec_src.groupby("매물묶음키", dropna=False).last().fillna("")
-    spec_map = spec_grouped[["단지명", "동/호수", "층/타입", "거래방식", "가격"]].to_dict(
+    spec_map = spec_grouped[["단지명", "동/호수", "층/타입", "거래방식", "가격", "방향"]].to_dict(
         orient="index"
     )
     value_by_bundle = my_evt.groupby("매물묶음키")["is_value"].sum() if not my_evt.empty else pd.Series(dtype="int64")
@@ -1298,6 +1785,7 @@ def _build_prime_action_df(
         dongho = str(spec.get("동/호수", "") or getattr(row, "동/호수", ""))
         floor_type = _dedup_floor_type_text(str(spec.get("층/타입", "") or getattr(row, "층/타입", "")))
         deal_type = str(spec.get("거래방식", "") or getattr(row, "거래방식", ""))
+        direction = str(spec.get("방향", "") or getattr(row, "방향", "") or _extract_direction_text(floor_type))
         raw_price_src = spec.get("가격") or getattr(row, "가격", None)
         price_str = _fmt_price_kr(raw_price_src)
         is_single_ui = (int(global_b_counts.get(bkey, 2)) <= 1) or (str(getattr(row, "노출형태", "")) == "단독")
@@ -1322,7 +1810,7 @@ def _build_prime_action_df(
         rows.append(
             {
                 "단지명": danji,
-                "Task": _task_label_from_spec(danji, dongho, floor_type, raw_price_src),
+                "Task": _task_label_from_spec(danji, dongho, floor_type, raw_price_src, direction),
                 "매물 중요도": importance,
                 "매물명": f"{danji} | {dongho} | {floor_type} | {deal_type} | {price}".strip(" |"),
                 "광고 갱신 횟수": renew_cnt,
@@ -1396,11 +1884,13 @@ def _precompute_all_complexes_data_impl(
 
         # 2. 매물을 특정하는 절대 기준 세팅 (대표님 엑셀 SOP 완벽 이식)
         # 노출형태(단독/묶음)는 갱신 시 변할 수 있으므로 제거, 멀티 채널 핑퐁 방지를 위해 CP사 추가
-        grp_keys = ["부동산명_정제", "단지명", "동/호수", "층/타입", "거래방식", "가격", "CP사"]
+        trk = _ensure_direction_and_tracking_key(trk)
+        grp_keys = ["부동산명_정제", "단지명", "동/호수", "층/타입", "거래방식", "가격", "CP사", "방향"]
 
         for c in grp_keys:
-            if c in trk.columns:
-                trk[c] = trk[c].fillna("미상")
+            if c not in trk.columns:
+                trk[c] = "미상"
+            trk[c] = trk[c].fillna("미상")
 
         trk = trk.sort_values(grp_keys + ["수집일시"])
 
@@ -1430,6 +1920,7 @@ def _precompute_all_complexes_data_impl(
             if "CP사" not in t_df_ms.columns:
                 t_df_ms["CP사"] = ""
             t_df_ms["CP사"] = t_df_ms["CP사"].fillna("").astype(str).str.strip()
+            t_df_ms = _ensure_direction_and_tracking_key(t_df_ms)
             t_df_ms["부동산명_정제"] = t_df_ms["부동산명"].apply(clean_realtor_name)
             t_df_ms["_순위정렬"] = pd.to_numeric(
                 t_df_ms["묶음내순위"]
@@ -1449,11 +1940,12 @@ def _precompute_all_complexes_data_impl(
                     "가격",
                     "부동산명_정제",
                     "CP사",
+                    "방향",
                 ]
             ).copy()
 
             uniq["묶음_총개수"] = uniq.groupby(
-                ["단지명", "동/호수", "층/타입", "거래방식", "가격", "CP사"]
+                ["단지명", "동/호수", "층/타입", "거래방식", "가격", "CP사", "방향"]
             )["부동산명_정제"].transform("count")
 
             uniq["파워점수"] = 10 + (10 / uniq["_순위정렬"]) + (uniq["묶음_총개수"] * 0.1)
@@ -2061,93 +2553,34 @@ def main() -> None:
         layout="wide",
         initial_sidebar_state="expanded",
     )
+    if "has_logged_visit" not in st.session_state:
+        st.session_state.has_logged_visit = True
+        log_user_action("1. 대시보드 최초 접속")
 
     st.markdown(
         """
-<link rel="stylesheet" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
 <style>
-    html, body, .stApp,
-    .block-container, .stMarkdown, [data-testid="stMarkdownContainer"],
-    label, p, small, h1, h2, h3, h4, h5, h6, .stCaption {
-        font-family: 'Pretendard', 'Noto Sans KR', -apple-system, BlinkMacSystemFont, sans-serif !important;
+    @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
+    html, body, [class*="css"], .stMarkdown, .stText {
+        font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, sans-serif !important;
     }
-    .stApp {
-        background: #F8FAFC !important;
-    }
+    .stApp { background-color: #F8FAFC; }
+    header, #MainMenu, footer {visibility: hidden;}
     .block-container {
-        padding-top: 3.5rem !important;
+        padding-top: 2rem !important;
         padding-bottom: 2.5rem !important;
+        max-width: 1400px !important;
     }
-    [data-testid="stMetric"] {
-        background: #FFFFFF !important;
-        border: 1px solid #E2E8F0 !important;
-        border-radius: 12px !important;
-        padding: 1rem 1.1rem !important;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.04) !important;
+    /* 탭(Tabs) 스타일링 */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px; background-color: #F1F5F9; padding: 8px 12px; border-radius: 12px;
     }
-    [data-testid="stMetric"] label {
-        color: #64748B !important;
+    .stTabs [data-baseweb="tab"] {
+        height: 48px; background-color: transparent; border-radius: 8px;
+        color: #64748B; font-weight: 600; font-size: 1.05rem; padding: 0 20px;
     }
-    [data-testid="stVerticalBlockBorderWrapper"] {
-        background: #FFFFFF !important;
-        border: 1px solid #E2E8F0 !important;
-        border-radius: 12px !important;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.04) !important;
-        padding: 0.35rem 0.5rem !important;
-    }
-    section[data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%) !important;
-        border-right: 1px solid #E2E8F0 !important;
-    }
-    section[data-testid="stSidebar"] .stButton > button {
-        border-radius: 9999px !important;
-        border: 1px solid #E2E8F0 !important;
-        background: #FFFFFF !important;
-        color: #334155 !important;
-        font-weight: 500 !important;
-        padding: 0.45rem 0.65rem !important;
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04) !important;
-        transition: background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease !important;
-    }
-    section[data-testid="stSidebar"] .stButton > button:hover {
-        background: #F1F5F9 !important;
-        border-color: #CBD5E1 !important;
-        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06) !important;
-    }
-    section[data-testid="stSidebar"] .stButton > button:focus-visible {
-        outline: 2px solid #94A3B8 !important;
-        outline-offset: 2px !important;
-    }
-    /* 사이드바 필터 박스 시인성 강화 */
-    section[data-testid="stSidebar"] .stDateInput > div > div > input,
-    section[data-testid="stSidebar"] .stSelectbox > div > div > div {
-        background-color: #EFF6FF !important;
-        border: 1px solid #BFDBFE !important;
-        font-weight: 600 !important;
-        color: #1E3A8A !important;
-        border-radius: 8px !important;
-    }
-    section[data-testid="stSidebar"] .stDateInput > div > div > input:focus,
-    section[data-testid="stSidebar"] .stSelectbox > div > div > div:focus {
-        border: 2px solid #3B82F6 !important;
-        box-shadow: 0 0 0 1px #3B82F6 !important;
-    }
-    /* 탭(라디오 버튼 영역) 크기 뻥튀기 */
-    button[data-baseweb="tab"] p {
-        font-size: 1.25rem !important;
-        font-weight: 800 !important;
-    }
-    /* 시작일/종료일 달력 입력창 파란색 배경 적용 */
-    div[data-testid="stDateInput"] input {
-        background-color: #EFF6FF !important;
-        border: 1px solid #BFDBFE !important;
-        color: #1E3A8A !important;
-        font-weight: 600 !important;
-        border-radius: 8px !important;
-    }
-    div[data-testid="stDateInput"] input:focus {
-        border: 2px solid #3B82F6 !important;
-        box-shadow: 0 0 0 1px #3B82F6 !important;
+    .stTabs [aria-selected="true"] {
+        background-color: #FFFFFF !important; color: #0F172A !important; box-shadow: 0 1px 3px rgba(0,0,0,0.1);
     }
 </style>
 """,
@@ -2204,7 +2637,10 @@ def main() -> None:
 
     df = process_data(raw_df)
     if "CP사" in df.columns:
-        df = df[df["CP사"] != "한국공인중개사협회"].copy()
+        df = df[
+            ~df["CP사"].fillna("").astype(str).str.contains("한국공인중개사협회", na=False)
+        ].copy()
+    df = _prepare_listing_identity(df)
     if "수집일시" in df.columns:
         df["수집일시"] = pd.to_datetime(df["수집일시"], errors="coerce")
 
@@ -2253,6 +2689,12 @@ def main() -> None:
         key="tl_complex_filter",
     )
 
+    if "last_viewed_complex" not in st.session_state:
+        st.session_state.last_viewed_complex = _sel_complex
+    elif st.session_state.last_viewed_complex != _sel_complex:
+        log_user_action(f"2. 단지 조회 변경: {_sel_complex}")
+        st.session_state.last_viewed_complex = _sel_complex
+
     complex_data = master_data_dict.get(_sel_complex)
     if complex_data is None:
         st.error("해당 단지의 계산된 데이터가 없습니다.")
@@ -2262,13 +2704,15 @@ def main() -> None:
         _patch_unauth_demo_complex_data(complex_data, e_d)
 
     action_df = complex_data["action"]
+    if "tl_task_sort" not in st.session_state:
+        st.session_state.tl_task_sort = _TASK_SORT_OPTIONS[0]
     timeline_df = complex_data["timeline"]
     ms_df = complex_data.get("ms", pd.DataFrame())
     comp_df = complex_data.get("comp", pd.DataFrame())
     if IS_UNAUTH_DEMO:
         ms_df = _unauth_ms_top10_df()
 
-    # 탭을 제거하고 메인 화면 단일 레이아웃으로 통합
+    # B2B SaaS 레이아웃: KPI 4열 + Tabs (트렌드 / 타임라인 / M·S)
     if True:
         tl_plot, day_start, day_end = _clip_timeline_to_chart_day(timeline_df, e_d)
         if tl_plot.empty:
@@ -2277,18 +2721,10 @@ def main() -> None:
             active_tasks = tl_plot["Task"].dropna().unique()
             action_df_48h = action_df[action_df["Task"].isin(active_tasks)].copy()
 
-        # [UI 개선] 메인 리포트 타이틀 크기 확대
         st.markdown(
-            f"""
-            <div style="margin-bottom: 20px;">
-                <span style="font-size: 2.0rem; font-weight: 800; color: #1E293B;">🏢 {filter_realtor_name} 전용 리포트</span>
-                <br>
-                <span style="font-size: 1.05rem; color: #64748B;">현재 표시된 차트 및 지표는 종료일({e_d.month}/{e_d.day}) 기준 최근 48시간 동안 활동 이력이 있는 핵심 매물만을 대상으로 분석되었습니다.</span>
-            </div>
-            """,
+            f'<div style="margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid #E2E8F0;"><span style="font-size: 2.2rem; font-weight: 800; color: #0F172A;">🏢 {filter_realtor_name} 전용 리포트</span><br><span style="font-size: 1.05rem; color: #64748B; font-weight: 500;">종료일({e_d.month}/{e_d.day}) 기준 최근 48시간 내 활동 이력이 있는 핵심 매물 분석 결과입니다.</span></div>',
             unsafe_allow_html=True,
         )
-
         with st.expander("📘 고객용 가이드 (백서)", expanded=False):
             st.markdown(_CUSTOMER_WHITEPAPER_MD)
 
@@ -2298,669 +2734,383 @@ def main() -> None:
         eff_day_prev = e_d - timedelta(days=1)
         eff_color = "#10B981" if eff_total >= 80 else ("#F59E0B" if eff_total >= 50 else "#EF4444")
 
-        # ==========================================
-        # [UI 개선] 점수 카드와 트렌드 카드 높이 완벽 정렬
-        # ==========================================
-        _score_trend_chart_h = 240  # 차트와 박스 높이를 맞추기 위해 강제 고정
-
-        c_score, c_spark = st.columns([1, 1.5])
-
-        # 1. 좌측: 메인 점수 카드
-        with c_score:
-            with st.container(border=True):
-                st.caption(
-                    f"🎯 **AI 광고 효율 총점** · 최근 48시간({eff_day_prev.month}/{eff_day_prev.day} ~ {e_d.month}/{e_d.day})"
-                )
-                _eff_bar_pct = max(0.0, min(float(eff_total), 100.0))
-                st.markdown(
-                    f"""
-                    <div style="display: flex; flex-direction: column; justify-content: center; padding: 25px 15px; height: {_score_trend_chart_h}px; box-sizing: border-box;">
-                        <p style="margin:0; font-size:3.2rem; font-weight:800; color:{eff_color}; line-height:1;">{eff_total:.1f}<span style="font-size:1.6rem; color:#475569;">점</span></p>
-                        <div style="width: 100%; background-color: #E2E8F0; border-radius: 999px; height: 10px; margin-top: 20px; overflow: hidden;">
-                            <div style="background-color: {eff_color}; width: {_eff_bar_pct}%; height: 10px; border-radius: 999px;"></div>
-                        </div>
-                        <p style="margin-top:12px; font-size:0.8rem; color:#94A3B8; font-weight:600;">* 심야 시간(00:00~08:00) 평가 제외</p>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-
-        # 2. 우측: 스파크라인 트렌드 카드
-        with c_spark:
-            with st.container(border=True):
-                st.caption("📈 **일간 점수 트렌드 (최근 2주)**")
-
-                spark_start = max(e_d - timedelta(days=13), start_dt.date())
-                dates = pd.date_range(start=spark_start, end=end_dt.date())
-
-                if IS_UNAUTH_DEMO:
-                    _t0 = max(e_d - timedelta(days=13), start_dt.date())
-                    spark_days = [_t0 + timedelta(days=i) for i in range(14)]
-                    # [수정] 밋밋하지 않게 극적인 우상향 그래프로 데이터 변경
-                    _scores_14 = [38, 42, 35, 52, 48, 65, 55, 72, 68, 85, 78, 92, 88, 95]
-                    df_trend = pd.DataFrame({"날짜": spark_days, "점수": _scores_14})
-                else:
-                    trend_data = []
-                    for d in dates:
-                        d_date = d.date()
-                        t_tl, _, _ = _clip_timeline_to_chart_day(timeline_df, d_date)
-                        sc = _timeline_efficiency_score_from_tl_plot(t_tl)
-                        trend_data.append({"날짜": d_date, "점수": sc})
-                    df_trend = pd.DataFrame(trend_data)
-                    if df_trend.empty:
-                        df_trend = pd.DataFrame([{"날짜": e_d, "점수": float(eff_total)}])
-
-                # 차트 렌더링
-                fig_spark = px.line(df_trend, x="날짜", y="점수", markers=True)
-                fig_spark.update_traces(
-                    line_color="#3B82F6",
-                    line_width=3,
-                    marker=dict(size=8, color="white", line=dict(color="#1E40AF", width=2)),
-                )
-
-                # [수정] Y축 라벨 25단위 고정 (데모, 실제 모두 완벽 적용)
-                _spark_yaxis = dict(
-                    title="",
-                    visible=True,
-                    showgrid=True,
-                    gridcolor="#F1F5F9",
-                    range=[0, 105],
-                    fixedrange=True,
-                    tickmode="array",
-                    tickvals=[0, 25, 50, 75, 100],
-                    ticktext=["0", "25", "50", "75", "100"],
-                )
-
-                fig_spark.update_layout(
-                    margin=dict(l=10, r=10, t=20, b=10),
-                    xaxis=dict(
-                        title="",
-                        visible=True,
-                        showgrid=False,
-                        fixedrange=True,
-                        tickformat="%m/%d",
-                    ),
-                    yaxis=_spark_yaxis,
-                    paper_bgcolor="rgba(0,0,0,0)",
-                    plot_bgcolor="rgba(0,0,0,0)",
-                    height=_score_trend_chart_h,  # 좌측 박스와 완벽하게 일치
-                    hovermode="x unified",
-                )
-                st.plotly_chart(fig_spark, use_container_width=True, config={"displayModeBar": False})
-
         n_total = len(action_df_48h) if not action_df_48h.empty else 0
         n_ok = int((action_df_48h["상태"] == "✅ 방어 중").sum()) if not action_df_48h.empty else 0
         n_bad = int((action_df_48h["상태"] == "❌ 효력 종료").sum()) if not action_df_48h.empty else 0
 
         st.markdown(
             f"""
-            <div style="display: flex; gap: 15px; margin-top: 15px; margin-bottom: 8px; flex-wrap: wrap;">
-                <div style="flex: 1; min-width: 200px; background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 12px; padding: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
-                    <div style="color: #64748B; font-size: 14px; font-weight: 600; margin-bottom: 8px;">총 관리 매물 수</div>
-                    <div style="color: #0F172A; font-size: 32px; font-weight: 800;">{n_total:,}</div>
-                </div>
-                <div style="flex: 1; min-width: 200px; background: #ECFDF5; border: 1px solid #D1FAE5; border-radius: 12px; padding: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
-                    <div style="color: #065F46; font-size: 14px; font-weight: 600; margin-bottom: 8px;">🟢 현재 상위권인 매물 수</div>
-                    <div style="color: #047857; font-size: 32px; font-weight: 800;">{n_ok:,}</div>
-                </div>
-                <div style="flex: 1; min-width: 200px; background: #FEF2F2; border: 1px solid #FEE2E2; border-radius: 12px; padding: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
-                    <div style="color: #991B1B; font-size: 14px; font-weight: 600; margin-bottom: 8px;">🔴 현재 상위권에서 탈락한 매물 수</div>
-                    <div style="color: #B91C1C; font-size: 32px; font-weight: 800;">{n_bad:,}</div>
+        <div style="display: flex; gap: 16px; margin-top: 10px; margin-bottom: 24px; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 220px; background-color: #185294; border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); color: #FFFFFF;">
+                <div style="font-size: 14px; font-weight: 500; opacity: 0.9; margin-bottom: 8px;">🎯 AI 광고 효율 총점</div>
+                <div style="display: flex; align-items: baseline; gap: 4px;">
+                    <span style="font-size: 34px; font-weight: 700; line-height: 1;">{eff_total:.1f}</span>
+                    <span style="font-size: 16px; font-weight: 500; opacity: 0.8;">점</span>
                 </div>
             </div>
-            """,
+            <div style="flex: 1; min-width: 220px; background-color: #0986B6; border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); color: #FFFFFF;">
+                <div style="font-size: 14px; font-weight: 500; opacity: 0.9; margin-bottom: 8px;">전체 감시 매물</div>
+                <div style="font-size: 34px; font-weight: 700; line-height: 1;">{n_total:,}</div>
+            </div>
+            <div style="flex: 1; min-width: 220px; background-color: #25B196; border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); color: #FFFFFF;">
+                <div style="font-size: 14px; font-weight: 500; opacity: 0.9; margin-bottom: 8px;">🟢 현재 상위권 (1~3위)</div>
+                <div style="font-size: 34px; font-weight: 700; line-height: 1;">{n_ok:,}</div>
+            </div>
+            <div style="flex: 1; min-width: 220px; background-color: #745396; border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); color: #FFFFFF;">
+                <div style="font-size: 14px; font-weight: 500; opacity: 0.9; margin-bottom: 8px;">🔴 상위권 이탈</div>
+                <div style="font-size: 34px; font-weight: 700; line-height: 1;">{n_bad:,}</div>
+            </div>
+        </div>
+        """,
             unsafe_allow_html=True,
         )
 
-        # Toss 스타일: 방어=블루, 순위 밀림=라이트 그레이(비움 느낌)
-        _toss_title = "#191F28"
-        _toss_body = "#333D4B"
-        _toss_sub = "#8B95A1"
-        _toss_blue = "#3182F6"
-        _toss_bg_gray = "#F2F4F6"
-        _toss_line_gray = "#E5E8EB"
-        state_colors = {
-            "🟢 1~3위 방어 중": _toss_blue,
-            "🔴 경쟁사 진입 (순위 밀림)": _toss_line_gray,
-        }
-
-        if tl_plot.empty:
-            st.info(f"**{e_d}** 일자에 타임라인으로 표시할 수집 구간이 없습니다. (분석 기간·데이터를 확인하세요.)")
-        else:
-            # 1. 완벽한 매물 매칭 함수 (단지명과 동/호수 분리 탐색으로 100% 매칭 보장)
-            def _get_row(t_str):
-                for adf in (action_df, action_df_48h):
-                    if adf is None or adf.empty:
-                        continue
-                    t_clean = str(t_str).replace(" ", "")
-                    if "Task" in adf.columns:
-                        for _, r in adf.iterrows():
-                            if str(r.get("Task", "")).replace(" ", "") == t_clean:
-                                return r
-                    parts = str(t_str).replace("(", "").replace(")", "").split()
-                    if len(parts) >= 2:
-                        for _, r in adf.iterrows():
-                            m_name = str(r.get("매물명", ""))
-                            if parts[0] in m_name and parts[1] in m_name:
-                                return r
-                return None
-
-            # 2. 정렬 및 Y축 갱신 횟수 라벨 구축 (undefined·공백 등 쓰레기 라벨 제외 → 상단 공백 완화)
-            raw_tasks = tl_plot["Task"].dropna().unique().tolist()
-            unique_tasks = [
-                t
-                for t in raw_tasks
-                if str(t).strip()
-                and str(t).strip().lower() != "undefined"
-                and str(t).strip().lower() != "nan"
+        tab_command, tab_timeline, tab_trend, tab_ms = st.tabs(
+            [
+                "📡 전술 지휘 통제 센터",
+                "📊 점유율 타임라인",
+                "📈 일간 점수 트렌드",
+                "🏆 단지 내 시장 점유율 (M/S)",
             ]
-            sort_info = {}
-            for t in unique_tasks:
-                r = _get_row(t)
-                if r is not None:
-                    dj = str(r.get("단지명", ""))
-                    cnt = int(pd.to_numeric(r.get("광고 갱신 횟수", 0), errors="coerce") or 0)
-                    last_up = str(r.get("최근 갱신 시각", "") or "").strip() or "기록 없음"
-                    sort_info[t] = (dj, cnt, last_up, r)
-                else:
-                    sort_info[t] = ("", 0, "기록 없음", None)
+        )
 
-            def get_sort_key(t):
-                info = sort_info.get(t)
-                return (info[0], -info[1], t) if info else ("", 0, t)
 
-            task_order = sorted(unique_tasks, key=get_sort_key)
-            ticktext_list = [
-                f"{t} · 🔄 {sort_info[t][1]}회 · 🕒 {sort_info[t][2]}&nbsp;&nbsp;&nbsp;&nbsp;"
-                for t in task_order
-            ]
-
-            # ==========================================
-            # [수정] 🚀 매물별 실시간 감시망 (Live Tracker)
-            # ==========================================
-            kst_now = _now_kst_naive()
-            kst_today = kst_now.date()
-            if IS_UNAUTH_DEMO:
-                kst_now = pd.Timestamp.combine(kst_today, datetime.min.time()) + timedelta(
-                    hours=10, minutes=19
-                )
-                kst_today = kst_now.date()
-
-            # 원본 데이터 및 내 매물(Task) 리스트 확보
-            t_df = filtered_df[filtered_df["단지명"] == _sel_complex].copy()
-            if not t_df.empty and "Task" not in t_df.columns:
-                t_df["Task"] = t_df.apply(
-                    lambda r: _task_label_from_spec(
-                        r.get("단지명", ""),
-                        r.get("동/호수", ""),
-                        r.get("층/타입", ""),
-                        _scalar_price_str(r.get("가격", "")),
-                    ),
-                    axis=1,
-                )
-
-            my_unified = clean_realtor_name(filter_realtor_name)
-            t_df["부동산명_통합"] = t_df["부동산명"].apply(clean_realtor_name)
-
-            # 현재 화면에 보이는 내 활동 매물 위주로 리스트업 (유령 매물: 28일 내 갱신 2건 미만 제외)
-            def _renewal_events_28d_for_task(task: str, td: pd.DataFrame, today_d: datetime.date) -> int:
-                if td.empty or "Task" not in td.columns:
-                    return 0
-                sub = td[td["Task"] == task].copy()
-                if sub.empty:
-                    return 0
-                sub["_ts"] = pd.to_datetime(sub["수집일시"], errors="coerce")
-                sub = sub[sub["_ts"].notna()]
-                start_d = today_d - timedelta(days=27)
-                sub = sub[sub["_ts"].dt.date >= start_d]
-                if sub.empty:
-                    return 0
-                dedup_cols = [c for c in ("매물묶음키", "수집일시", "확인일자") if c in sub.columns]
-                if dedup_cols:
-                    return len(sub.drop_duplicates(subset=dedup_cols))
-                return len(sub.drop_duplicates(subset=["수집일시"]))
-
-            _raw_tracker_tasks = tl_plot["Task"].dropna().unique().tolist() if not tl_plot.empty else []
-            active_tasks = [
-                t
-                for t in _raw_tracker_tasks
-                if _renewal_events_28d_for_task(str(t), t_df, kst_today) >= 2
-            ]
-
-            if active_tasks:
-                st.markdown("---")
-                # [수정] 제목 폰트 확대
-                st.markdown(
-                    f"<h3 style='color:#1E293B; margin-bottom: 0px;'>👀 실시간 타점 감시망 <span style='font-size: 1.2rem; color: #64748B;'>(기준: {kst_now.strftime('%H:%M')})</span></h3>",
-                    unsafe_allow_html=True,
-                )
-
-                # [수정] 선택창 라벨 폰트 확대 (기본 라벨은 숨김)
-                st.markdown(
-                    "<div style='font-size: 1.15rem; font-weight: 700; color: #334155; margin-top: 18px; margin-bottom: 5px;'>🎯 감시할 내 매물을 선택하세요:</div>",
-                    unsafe_allow_html=True,
-                )
-                st.markdown("<br>", unsafe_allow_html=True)
-                sel_task = st.selectbox(
-                    label="감시할 매물 선택",
-                    label_visibility="collapsed",
-                    options=active_tasks,
-                    key="live_tracker_task_select",
-                )
-
-                # 2. 선택된 매물의 경쟁사 — 상위권 판별만 묶음 단위로, 갱신·패턴은 단지 전역 boosted/comp
-                sub_df = t_df[t_df["Task"] == sel_task].copy()
-
-                if not sub_df.empty:
-                    b_df = complex_data.get("boosted")
-                    if b_df is not None and not b_df.empty:
-                        b_df = b_df.copy()
-                        b_df["수집일시"] = pd.to_datetime(b_df["수집일시"], errors="coerce")
-                        if "부동산명_정제" not in b_df.columns:
-                            b_df["부동산명_정제"] = b_df["부동산명"].apply(clean_realtor_name)
-                        today_renewed = b_df[b_df["수집일시"].dt.date == kst_today][
-                            "부동산명_정제"
-                        ].unique().tolist()
-                        b_freq = b_df.dropna(subset=["수집일시"])
-                        analysis_days = max(
-                            1,
-                            (b_freq["수집일시"].max().date() - b_freq["수집일시"].min().date()).days + 1,
-                        )
-                        renew_counts = b_freq.groupby("부동산명_정제", dropna=False).size()
-                        high_freq_unified = [
-                            r for r, cnt in renew_counts.items() if (analysis_days / cnt) <= 4.0
-                        ]
-                    else:
-                        today_renewed = []
-                        high_freq_unified = []
-
-                    # [타겟 1] 상위권 (최근 묶음내순위 1~3위) — 선택 매물 스냅샷만 사용
-                    latest_ranks = sub_df.groupby("부동산명_통합")["묶음내순위_숫자"].last().reset_index()
-                    latest_ranks["묶음내순위_숫자"] = (
-                        pd.to_numeric(latest_ranks["묶음내순위_숫자"], errors="coerce").fillna(999)
+        with tab_command:
+            _cmd_sort_mode = _render_tracking_tab_header(
+                "<h3 style='color:#0F172A;margin:0 0 4px 0;'>📡 전술 지휘 통제 센터</h3>",
+                widget_key="tl_task_sort_command",
+            )
+            if tl_plot.empty:
+                st.info(f"**{e_d}** 일자에 표시할 활동 매물이 없습니다.")
+            else:
+                kst_now_cmd = _now_kst_naive()
+                kst_today_cmd = kst_now_cmd.date()
+                if IS_UNAUTH_DEMO:
+                    kst_now_cmd = pd.Timestamp.combine(kst_today_cmd, datetime.min.time()) + timedelta(
+                        hours=10, minutes=19
                     )
-                    top3_unified = latest_ranks[latest_ranks["묶음내순위_숫자"] <= 3]["부동산명_통합"].tolist()
+                    kst_today_cmd = kst_now_cmd.date()
 
-                    sub_realtors = sub_df["부동산명_통합"].unique().tolist()
-                    high_freq_unified = [r for r in high_freq_unified if r in sub_realtors]
+                t_df_cmd = filtered_df[filtered_df["단지명"] == _sel_complex].copy()
+                if not t_df_cmd.empty and "Task" not in t_df_cmd.columns:
+                    t_df_cmd["Task"] = t_df_cmd.apply(
+                        lambda r: _task_label_from_spec(
+                            r.get("단지명", ""),
+                            r.get("동/호수", ""),
+                            r.get("층/타입", ""),
+                            _scalar_price_str(r.get("가격", "")),
+                            r.get("방향", ""),
+                        ),
+                        axis=1,
+                    )
+                my_unified_cmd = clean_realtor_name(filter_realtor_name)
+                if not t_df_cmd.empty:
+                    t_df_cmd["부동산명_통합"] = t_df_cmd["부동산명"].apply(clean_realtor_name)
 
-                    target_status = {}
-                    for r_uni in set(top3_unified + high_freq_unified):
-                        if r_uni == my_unified:
-                            continue
+                _raw_cmd_tasks = tl_plot["Task"].dropna().unique().tolist()
+                active_tasks_cmd = [
+                    t
+                    for t in _raw_cmd_tasks
+                    if _renewal_events_28d_for_task(str(t), t_df_cmd, kst_today_cmd) >= 2
+                ]
 
-                        r_original_series = sub_df[sub_df["부동산명_통합"] == r_uni]["부동산명"]
-                        if r_original_series.empty:
-                            continue
-                        r_original = r_original_series.iloc[-1]
-                        r_disp = mask_text(
-                            r_original,
-                            is_demo=IS_DEMO_MODE,
+                st.caption(
+                    f"기준 시각 **{kst_now_cmd.strftime('%H:%M')}** · 감시 매물 **{len(active_tasks_cmd)}**건"
+                )
+
+                if not active_tasks_cmd:
+                    st.info(
+                        "최근 28일 내 갱신 이력이 2건 미만인 매물(유령 부동산)은 지휘 통제 목록에서 제외됩니다."
+                    )
+                else:
+                    strategy_dict_cmd = complex_data.get("strategy_dict", {})
+                    _command_rows: list[tuple] = []
+                    for _task_cmd in active_tasks_cmd:
+                        _ts_cmd = _build_target_status_for_task(
+                            _task_cmd,
+                            t_df_cmd,
+                            complex_data,
+                            comp_df,
+                            kst_now=kst_now_cmd,
+                            kst_today=kst_today_cmd,
+                            my_unified=my_unified_cmd,
+                            is_demo_mode=IS_DEMO_MODE,
+                            is_unauth_demo=IS_UNAUTH_DEMO,
                             filter_realtor_name=filter_realtor_name,
                             display_realtor=display_realtor,
                         )
-                        r_disp_short = html.escape(_strip_realtor_label_noise(r_disp))
-                        is_today = r_uni in today_renewed
-                        last_active_hhmm = _last_renewal_hhmm_today(
-                            r_uni, kst_today, b_df if b_df is not None else None, sub_df
+                        _ai_cmd = strategy_dict_cmd.get(_task_cmd, "") or ""
+                        _any_wait_cmd = (
+                            any(v.get("is_waiting") for v in _ts_cmd.values()) if _ts_cmd else False
+                        )
+                        _act_cmd = _determine_action_state(
+                            target_status=_ts_cmd,
+                            any_waiting=_any_wait_cmd,
+                            ai_msg=_ai_cmd,
+                            kst_now=kst_now_cmd,
+                        )
+                        _command_rows.append((_task_cmd, _act_cmd, _ai_cmd, _ts_cmd))
+
+                    _sorted_cmd_tasks = _sort_tracking_tasks(
+                        active_tasks_cmd, action_df, _cmd_sort_mode
+                    )
+                    _cmd_by_task = {row[0]: row for row in _command_rows}
+
+                    for _idx_cmd, _task_cmd in enumerate(_sorted_cmd_tasks):
+                        _row_cmd = _cmd_by_task.get(_task_cmd)
+                        if not _row_cmd:
+                            continue
+                        _task_cmd, _act_cmd, _ai_cmd, _ts_cmd = _row_cmd
+                        _status_label, _status_accent = _status_badge_from_action(_act_cmd)
+                        _ai_summary = _format_ai_recommendation_summary(_ai_cmd)
+                        _render_command_summary_row(
+                            _task_cmd,
+                            _ts_cmd,
+                            status_label=_status_label,
+                            status_accent=_status_accent,
+                            ai_summary=_ai_summary,
+                            expander_key=f"cmd_detail_{_idx_cmd}",
                         )
 
-                        peak_usual = "패턴 불규칙"
-                        peak_today_wd = "-"
-                        wd_group = ""
-                        deadline = 18
-                        freq_str = "갱신 패턴 산출 전"
-                        weekday_real = True
-
-                        if not comp_df.empty and "부동산명" in comp_df.columns:
-                            comp_match = comp_df.copy()
-                            comp_match["부동산명_통합"] = comp_match["부동산명"].apply(clean_realtor_name)
-                            cm = comp_match.loc[comp_match["부동산명_통합"] == r_uni]
-                            if not cm.empty:
-                                row0 = cm.iloc[0]
-                                if "갱신빈도" in cm.columns:
-                                    fv = row0.get("갱신빈도")
-                                    if pd.notna(fv) and str(fv).strip():
-                                        freq_str = str(fv)
-                                if "주력 갱신 시간" in cm.columns and pd.notna(row0.get("주력 갱신 시간")):
-                                    peak_usual = str(row0["주력 갱신 시간"])
-                                if "오늘 요일 주력 시간" in cm.columns and pd.notna(
-                                    row0.get("오늘 요일 주력 시간")
-                                ):
-                                    peak_today_wd = str(row0["오늘 요일 주력 시간"])
-                                if "오늘_요일_그룹" in cm.columns and pd.notna(row0.get("오늘_요일_그룹")):
-                                    wd_group = str(row0["오늘_요일_그룹"])
-                                if "오늘 요일 마지노선" in cm.columns:
-                                    try:
-                                        deadline = int(float(row0["오늘 요일 마지노선"]))
-                                    except (TypeError, ValueError):
-                                        deadline = 18
-                                if "오늘요일_실측" in cm.columns:
-                                    _wr = row0.get("오늘요일_실측")
-                                    weekday_real = True if pd.isna(_wr) else bool(_wr)
-
-                        now_hour = kst_now.hour
-
-                        _bad_peak = ("-", "패턴 불규칙", "", "nan")
-                        peak_usual_n = str(peak_usual).strip()
-                        peak_today_n = str(peak_today_wd).strip()
-                        if peak_today_n.lower() in ("nan", "none"):
-                            peak_today_n = "-"
-
-                        wd_disp = wd_group if wd_group else ""
-                        if not weekday_real and wd_disp:
-                            if peak_usual_n not in _bad_peak:
-                                pattern_desc = (
-                                    f"{wd_disp} 패턴: 데이터 없음 (전체 기준 {peak_usual_n})"
-                                )
-                            else:
-                                pattern_desc = f"{wd_disp} 패턴: 데이터 없음 (평일 기준 분석)"
-                        elif peak_usual_n in _bad_peak or peak_today_n in _bad_peak:
-                            pattern_desc = "패턴 데이터 부족"
-                        elif peak_usual_n == peak_today_n:
-                            pattern_desc = f"평소처럼 {peak_today_n}에 집중합니다"
-                        else:
-                            wg = f"{wd_disp} " if wd_disp else ""
-                            pattern_desc = f"평소 {peak_usual_n} ➔ {wg}{peak_today_n} 위주"
-
-                        # 3행: 상태 / 패턴 / 마지노선 (가독성 고정 포맷)
-                        _gray = "color:#64748b;font-size:0.9rem;"
-                        _small = "color:#94a3b8;font-size:0.8rem;"
-                        if is_today:
-                            state_html = (
-                                f"<b>🟢 오늘 광고 완료 ({last_active_hhmm} 진행)</b>"
-                                f"<br><span style='{_gray}'>{html.escape(pattern_desc)}</span>"
-                                f"<br><span style='{_small}'>마지노선: {deadline}시</span>"
-                            )
-                            is_waiting = False
-                        elif now_hour < deadline:
-                            state_html = (
-                                f"<b>🔴 아직 활동 전 (주의)</b>"
-                                f"<br><span style='{_gray}'>{html.escape(pattern_desc)}</span>"
-                                f"<br><span style='{_small}'>마지노선: {deadline}시 (이후 안전)</span>"
-                            )
-                            is_waiting = True
-                        else:
-                            state_html = (
-                                f"<b><span style='color:#3B82F6;'>🔵 활동 없음 (마지노선 경과)</span></b>"
-                                f"<br><span style='{_gray}'>{html.escape(pattern_desc)}</span>"
-                                f"<br><span style='{_small}'>마지노선 {deadline}시 경과</span>"
-                            )
-                            is_waiting = False
-
-                        if r_uni in top3_unified:
-                            target_status[r_uni] = {
-                                "display": r_disp,
-                                "display_short": r_disp_short,
-                                "freq": freq_str,
-                                "icon": "👑",
-                                "html": state_html,
-                                "is_waiting": is_waiting,
-                                "is_done_today": is_today,
-                                "last_active_time": last_active_hhmm,
-                                "type": "상위권 방어조",
-                            }
-                        else:
-                            target_status[r_uni] = {
-                                "display": r_disp,
-                                "display_short": r_disp_short,
-                                "freq": freq_str,
-                                "icon": "🔥",
-                                "html": state_html,
-                                "is_waiting": is_waiting,
-                                "is_done_today": is_today,
-                                "last_active_time": last_active_hhmm,
-                                "type": "고빈도 추격조",
-                            }
-
-                    if IS_UNAUTH_DEMO and target_status:
-                        _apply_unauth_demo_watch_target_overrides(target_status)
-
-                    # ===========================================================
-                    # [최상단] 통합 타격 지시 카드 (Integrated Action Card)
-                    # ===========================================================
-                    strategy_dict = complex_data.get("strategy_dict", {})
-                    ai_msg = strategy_dict.get(sel_task, "") or ""
-                    any_waiting = (
-                        any(info["is_waiting"] for info in target_status.values())
-                        if target_status
-                        else False
-                    )
-
-                    action = _determine_action_state(
-                        target_status=target_status,
-                        any_waiting=any_waiting,
-                        ai_msg=ai_msg,
-                        kst_now=kst_now,
-                    )
-                    waiting_cnt_card = sum(
-                        1 for info in target_status.values() if info.get("is_waiting")
-                    )
-                    _render_action_card(
-                        action,
-                        ai_msg,
-                        total_watch=len(target_status),
-                        waiting_watch=waiting_cnt_card,
-                    )
-
-                    # ===========================================================
-                    # [보조 정보] 감시 중인 경쟁사 상세 — 작게 나열
-                    # ===========================================================
-                    if target_status:
-                        st.markdown(
-                            "<div style='font-size:1.0rem;font-weight:700;color:#334155;"
-                            "margin-top:6px;margin-bottom:4px;'>"
-                            f"👁️ 감시 중인 경쟁사 상세 "
-                            f"<span style='font-size:0.85rem;font-weight:500;color:#64748b;'>"
-                            f"([{sel_task}] 기준 · {len(target_status)}곳)"
-                            f"</span></div>",
-                            unsafe_allow_html=True,
-                        )
-                        st.caption(
-                            "※ 광고 여부는 단지 전체 기준으로 감시하며, "
-                            "현재 선택한 매물을 보유한 부동산만 표시됩니다."
-                        )
-
-                        def _freq_sort_score(info: dict) -> int:
-                            freq = str(info.get("freq", ""))
-                            if "매일" in freq:
-                                return 5
-                            if "2일" in freq:
-                                return 4
-                            if "3~4일" in freq:
-                                return 3
-                            if "주 1~2회" in freq:
-                                return 2
-                            if "비정기" in freq:
-                                return 1
-                            return 0
-
-                        sorted_targets = sorted(
-                            target_status.items(),
-                            key=lambda x: (
-                                -_freq_sort_score(x[1]),
-                                not x[1].get("is_waiting"),
-                                str(x[1].get("display", "")),
-                            ),
-                        )
-
-                        def _render_competitor_cards(items: list[tuple[str, dict]]) -> None:
-                            if not items:
-                                return
-                            cols = st.columns(4)
-                            for col_idx, (_, info) in enumerate(items):
-                                if info.get("is_waiting"):
-                                    _card_bg = "#eff6ff"
-                                elif info.get("is_done_today"):
-                                    _card_bg = "#ecfdf5"
-                                else:
-                                    _card_bg = "#f1f5f9"
-                                _title = info.get("display_short") or html.escape(
-                                    str(info.get("display", ""))
-                                )
-                                _freq_e = html.escape(str(info.get("freq", "")))
-                                cols[col_idx % 4].markdown(
-                                    f"<div style='height:180px; overflow-y:hidden; display:flex; "
-                                    f"flex-direction:column; justify-content:space-between; padding:15px; "
-                                    f"border-radius:8px; border:1px solid #ddd; background-color:{_card_bg}; "
-                                    f"margin-bottom:10px; box-sizing:border-box;'>"
-                                    f"<div>"
-                                    f"<div style='font-size:0.72rem; color:#64748b; margin-bottom:4px;'>"
-                                    f"{html.escape(str(info['icon']))} {html.escape(str(info['type']))}</div>"
-                                    f"<div style='font-weight:800; font-size:0.95rem; color:#1e293b; "
-                                    f"line-height:1.25; margin-bottom:4px;'>{_title} "
-                                    f"<span style='font-size:0.76rem; font-weight:500; color:#475569;'>"
-                                    f"({_freq_e})</span></div>"
-                                    f"</div>"
-                                    f"<div style='font-size:0.86rem; line-height:1.35;'>{info['html']}</div>"
-                                    f"</div>",
-                                    unsafe_allow_html=True,
-                                )
-
-                        visible_targets = sorted_targets[:8]
-                        hidden_targets = sorted_targets[8:]
-                        _render_competitor_cards(visible_targets)
-
-                        if hidden_targets:
-                            with st.expander(f"더보기 ({len(hidden_targets)}곳)", expanded=False):
-                                _render_competitor_cards(hidden_targets)
-            elif _raw_tracker_tasks:
-                st.markdown("---")
-                st.markdown(
-                    f"<h3 style='color:#1E293B; margin-bottom: 6px;'>👀 실시간 타점 감시망</h3>",
-                    unsafe_allow_html=True,
-                )
-                st.markdown(
-                    "<div style='height:180px; overflow-y:hidden; display:flex; align-items:center; "
-                    "justify-content:center; padding:15px; border-radius:8px; border:1px solid #ddd; "
-                    "background-color:#f8fafc; color:#475569; font-size:0.95rem; line-height:1.55; "
-                    "text-align:center; box-sizing:border-box;'>"
-                    "<div>최근 28일 내 갱신 이력이 <strong>2건 미만</strong>인 매물(유령 부동산)은 "
-                    "실시간 감시망 선택 목록에서 제외됩니다. 타임라인에 노출되는 다른 매물을 확인하거나 "
-                    "데이터 수집을 더 진행해 주세요.</div></div>",
-                    unsafe_allow_html=True,
-                )
-
+        with tab_trend:
             # ==========================================
-            # 아래부터는 기존 px.timeline 그리는 코드 (display_tl_df 치환 없이 원본 tl_hover 사용)
-            # 3. 차트 기본 렌더링 (툴팁: 내 순위·1위 부동산 마스킹, 호버 프레임은 캐시)
-            tl_hover = _build_plotly_hover_frame(
-                tl_plot,
-                IS_DEMO_MODE,
-                filter_realtor_name,
-                display_realtor,
-            )
-            tl_hover = tl_hover[tl_hover["Task"].isin(task_order)].copy()
-            for _c in ("Task", "State", "_hv_s", "_hv_f", "_hv_st", "_hv_rank", "_hv_extra"):
-                if _c in tl_hover.columns:
-                    tl_hover[_c] = tl_hover[_c].astype(str).str.replace("\ufffd", "", regex=False)
+            # [UI 개선] 점수 카드와 트렌드 카드 높이 완벽 정렬
+            # ==========================================
+            _score_trend_chart_h = 240  # 차트와 박스 높이를 맞추기 위해 강제 고정
 
-            fig = px.timeline(
-                tl_hover,
-                x_start="Start",
-                x_end="Finish",
-                y="Task",
-                color="State",
-                color_discrete_map=state_colors,
-                custom_data=["_hv_s", "_hv_f", "_hv_st", "_hv_rank", "_hv_extra"],
-            )
-            _plot_font = "'Pretendard', 'Noto Sans KR', sans-serif"
-            _grid_soft = "rgba(229, 232, 235, 0.85)"
-            _toss_red = "#F04452"
-            fig.update_traces(
-                hovertemplate=(
-                    "매물: %{y}<br>"
-                    "시간: %{customdata[0]} ~ %{customdata[1]}<br>"
-                    "상태: %{customdata[2]}<br>"
-                    "내 순위: %{customdata[3]}<br>"
-                    "%{customdata[4]}"
-                    "<extra></extra>"
-                ),
-                width=0.25,
-                selector=dict(type="bar"),
+            st.caption("📈 **일간 점수 트렌드 (최근 2주)**")
+
+            spark_start = max(e_d - timedelta(days=13), start_dt.date())
+            dates = pd.date_range(start=spark_start, end=end_dt.date())
+
+            if IS_UNAUTH_DEMO:
+                _t0 = max(e_d - timedelta(days=13), start_dt.date())
+                spark_days = [_t0 + timedelta(days=i) for i in range(14)]
+                # [수정] 밋밋하지 않게 극적인 우상향 그래프로 데이터 변경
+                _scores_14 = [38, 42, 35, 52, 48, 65, 55, 72, 68, 85, 78, 92, 88, 95]
+                df_trend = pd.DataFrame({"날짜": spark_days, "점수": _scores_14})
+            else:
+                trend_data = []
+                for d in dates:
+                    d_date = d.date()
+                    t_tl, _, _ = _clip_timeline_to_chart_day(timeline_df, d_date)
+                    sc = _timeline_efficiency_score_from_tl_plot(t_tl)
+                    trend_data.append({"날짜": d_date, "점수": sc})
+                df_trend = pd.DataFrame(trend_data)
+                if df_trend.empty:
+                    df_trend = pd.DataFrame([{"날짜": e_d, "점수": float(eff_total)}])
+
+            # 차트 렌더링
+            fig_spark = px.line(df_trend, x="날짜", y="점수", markers=True)
+            fig_spark.update_traces(
+                line_color="#3B82F6",
+                line_width=3,
+                marker=dict(size=8, color="white", line=dict(color="#1E40AF", width=2)),
             )
 
-            # 4. Y축 및 X축 강제 스타일링 (Y축 줌 고정 없음 → Plotly 높이 + iframe 스크롤)
-            fig.update_yaxes(
-                autorange="reversed",
-                automargin=True,
-                categoryorder="array",
-                categoryarray=task_order,
-                tickmode="array",
-                tickvals=task_order,
-                ticktext=ticktext_list,
-                tickfont=dict(family=_plot_font, size=11, color=_toss_body),
-                showgrid=True,
-                gridcolor=_grid_soft,
-                gridwidth=1,
-                zeroline=False,
-            )
-            # X축: 2시간 간격(4·6·8…)으로 정돈, 시간만 표시
-            _two_h_ms = 7200000
-            _x_tick0 = pd.Timestamp(day_start)
-            fig.update_xaxes(
-                side="top",
-                type="date",
-                range=[day_start, day_end],
-                tick0=_x_tick0,
-                dtick=_two_h_ms,
-                tickformat="%H:00",
-                tickformatstops=[
-                    dict(dtickrange=[None, None], value="%H:00"),
-                ],
-                tickangle=0,
-                tickfont=dict(family=_plot_font, size=9, color=_toss_sub),
-                showgrid=True,
-                gridcolor=_grid_soft,
-                gridwidth=1,
+            # [수정] Y축 라벨 25단위 고정 (데모, 실제 모두 완벽 적용)
+            _spark_yaxis = dict(
                 title="",
-            )
-            fig.update_layout(
-                dragmode="pan",
-                font=dict(family=_plot_font, size=12, color=_toss_body),
-                title=dict(font=dict(family=_plot_font, size=14, color=_toss_title)),
-                paper_bgcolor="white",
-                plot_bgcolor="white",
-                height=max(500, len(task_order) * 35),
-                margin=dict(l=300, r=20, t=56, b=88),
-                legend=dict(
-                    orientation="h",
-                    yanchor="top",
-                    y=-0.14,
-                    xanchor="center",
-                    x=0.5,
-                    font=dict(family=_plot_font, size=11, color=_toss_body),
-                    bgcolor="rgba(255,255,255,0.92)",
-                    bordercolor=_toss_line_gray,
-                    borderwidth=1,
-                ),
+                visible=True,
+                showgrid=True,
+                gridcolor="#F1F5F9",
+                range=[0, 105],
+                fixedrange=True,
+                tickmode="array",
+                tickvals=[0, 25, 50, 75, 100],
+                ticktext=["0", "25", "50", "75", "100"],
             )
 
-            for _night_day in (e_d - timedelta(days=1), e_d):
-                t_n0 = pd.Timestamp(datetime.combine(_night_day, datetime.min.time()))
-                t_n1 = t_n0 + pd.Timedelta(hours=7, minutes=59, seconds=59)
-                fig.add_vrect(
-                    x0=t_n0,
-                    x1=t_n1,
-                    fillcolor="rgba(148, 163, 184, 0.15)",
-                    layer="below",
-                    line_width=0,
-                    xref="x",
-                    yref="paper",
-                    y0=0,
-                    y1=1,
+            fig_spark.update_layout(
+                margin=dict(l=10, r=10, t=20, b=10),
+                xaxis=dict(
+                    title="",
+                    visible=True,
+                    showgrid=False,
+                    fixedrange=True,
+                    tickformat="%m/%d",
+                ),
+                yaxis=_spark_yaxis,
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                height=_score_trend_chart_h,  # 좌측 박스와 완벽하게 일치
+                hovermode="x unified",
+            )
+            st.plotly_chart(fig_spark, use_container_width=True, config={"displayModeBar": False})
+
+        with tab_timeline:
+            _tl_sort_mode = _render_tracking_tab_header(
+                "<h3 style='color:#0F172A;margin:0 0 4px 0;'>📊 점유율 타임라인</h3>",
+                widget_key="tl_task_sort_timeline",
+            )
+            # Toss 스타일: 방어=블루, 순위 밀림=라이트 그레이(비움 느낌)
+            _toss_title = "#191F28"
+            _toss_body = "#333D4B"
+            _toss_sub = "#8B95A1"
+            _toss_blue = "#3182F6"
+            _toss_bg_gray = "#F2F4F6"
+            _toss_line_gray = "#E5E8EB"
+            state_colors = {
+                "🟢 1~3위 방어 중": _toss_blue,
+                "🔴 경쟁사 진입 (순위 밀림)": _toss_line_gray,
+            }
+
+            if tl_plot.empty:
+                st.info(f"**{e_d}** 일자에 타임라인으로 표시할 수집 구간이 없습니다. (분석 기간·데이터를 확인하세요.)")
+            else:
+                # 1. 완벽한 매물 매칭 함수 (단지명과 동/호수 분리 탐색으로 100% 매칭 보장)
+                def _get_row(t_str):
+                    for adf in (action_df, action_df_48h):
+                        if adf is None or adf.empty:
+                            continue
+                        t_clean = str(t_str).replace(" ", "")
+                        if "Task" in adf.columns:
+                            for _, r in adf.iterrows():
+                                if str(r.get("Task", "")).replace(" ", "") == t_clean:
+                                    return r
+                        parts = str(t_str).replace("(", "").replace(")", "").split()
+                        if len(parts) >= 2:
+                            for _, r in adf.iterrows():
+                                m_name = str(r.get("매물명", ""))
+                                if parts[0] in m_name and parts[1] in m_name:
+                                    return r
+                    return None
+
+                # 2. 정렬 및 Y축 갱신 횟수 라벨 구축 (undefined·공백 등 쓰레기 라벨 제외 → 상단 공백 완화)
+                raw_tasks = tl_plot["Task"].dropna().unique().tolist()
+                unique_tasks = [
+                    t
+                    for t in raw_tasks
+                    if str(t).strip()
+                    and str(t).strip().lower() != "undefined"
+                    and str(t).strip().lower() != "nan"
+                ]
+                sort_info = {}
+                for t in unique_tasks:
+                    r = _get_row(t)
+                    if r is not None:
+                        dj = str(r.get("단지명", ""))
+                        cnt = int(pd.to_numeric(r.get("광고 갱신 횟수", 0), errors="coerce") or 0)
+                        last_up = str(r.get("최근 갱신 시각", "") or "").strip() or "기록 없음"
+                        sort_info[t] = (dj, cnt, last_up, r)
+                    else:
+                        sort_info[t] = ("", 0, "기록 없음", None)
+
+                task_order = _sort_tracking_tasks(unique_tasks, action_df, _tl_sort_mode)
+                ticktext_list = [
+                    f"{t}  ·  🔄 {sort_info[t][1]}회  ·  🕒 {sort_info[t][2]}"
+                    for t in task_order
+                ]
+
+                task_order_chart = task_order
+                ticktext_chart = ticktext_list
+
+                # ==========================================
+                # 아래부터는 기존 px.timeline 그리는 코드 (display_tl_df 치환 없이 원본 tl_hover 사용)
+                # 3. 차트 기본 렌더링 (툴팁: 내 순위·1위 부동산 마스킹, 호버 프레임은 캐시)
+                tl_hover = _build_plotly_hover_frame(
+                    tl_plot,
+                    IS_DEMO_MODE,
+                    filter_realtor_name,
+                    display_realtor,
+                )
+                tl_hover = tl_hover[tl_hover["Task"].isin(task_order_chart)].copy()
+                for _c in ("Task", "State", "_hv_s", "_hv_f", "_hv_st", "_hv_rank", "_hv_extra"):
+                    if _c in tl_hover.columns:
+                        tl_hover[_c] = tl_hover[_c].astype(str).str.replace("\ufffd", "", regex=False)
+
+                fig = px.timeline(
+                    tl_hover,
+                    x_start="Start",
+                    x_end="Finish",
+                    y="Task",
+                    color="State",
+                    color_discrete_map=state_colors,
+                    custom_data=["_hv_s", "_hv_f", "_hv_st", "_hv_rank", "_hv_extra"],
+                )
+                _plot_font = "'Pretendard', 'Noto Sans KR', sans-serif"
+                _grid_soft = "rgba(229, 232, 235, 0.85)"
+                _toss_red = "#F04452"
+                fig.update_traces(
+                    hovertemplate=(
+                        "매물: %{y}<br>"
+                        "시간: %{customdata[0]} ~ %{customdata[1]}<br>"
+                        "상태: %{customdata[2]}<br>"
+                        "내 순위: %{customdata[3]}<br>"
+                        "%{customdata[4]}"
+                        "<extra></extra>"
+                    ),
+                    width=0.25,
+                    selector=dict(type="bar"),
                 )
 
-            _peak_slots = ((11, 30, 13, 30), (19, 30, 21, 30))
-            for _pd in (e_d - timedelta(days=1), e_d):
-                _day0 = pd.Timestamp(datetime.combine(_pd, datetime.min.time()))
-                for _slot_i, (_h0, _m0, _h1, _m1) in enumerate(_peak_slots):
-                    _pk0 = _day0 + pd.Timedelta(hours=_h0, minutes=_m0)
-                    _pk1 = _day0 + pd.Timedelta(hours=_h1, minutes=_m1)
+                # 4. Y축 및 X축 강제 스타일링 (Y축 줌 고정 없음 → Plotly 높이 + iframe 스크롤)
+                fig.update_yaxes(
+                    autorange="reversed",
+                    automargin=True,
+                    categoryorder="array",
+                    categoryarray=task_order_chart,
+                    tickmode="array",
+                    tickvals=task_order_chart,
+                    ticktext=ticktext_chart,
+                    tickfont=dict(
+                        family=_plot_font,
+                        size=14,
+                        color=_toss_body,
+                    ),
+                    showgrid=True,
+                    gridcolor=_grid_soft,
+                    gridwidth=1,
+                    zeroline=False,
+                )
+                # X축: 2시간 간격(4·6·8…)으로 정돈, 시간만 표시
+                _two_h_ms = 7200000
+                _x_tick0 = pd.Timestamp(day_start)
+                fig.update_xaxes(
+                    side="top",
+                    type="date",
+                    range=[day_start, day_end],
+                    tick0=_x_tick0,
+                    dtick=_two_h_ms,
+                    tickformat="%H:00",
+                    tickformatstops=[
+                        dict(dtickrange=[None, None], value="%H:00"),
+                    ],
+                    tickangle=0,
+                    tickfont=dict(family=_plot_font, size=9, color=_toss_sub),
+                    showgrid=True,
+                    gridcolor=_grid_soft,
+                    gridwidth=1,
+                    title="",
+                )
+                fig.update_layout(
+                    dragmode="pan",
+                    font=dict(family=_plot_font, size=12, color=_toss_body),
+                    title=dict(font=dict(family=_plot_font, size=14, color=_toss_title)),
+                    paper_bgcolor="white",
+                    plot_bgcolor="white",
+                    height=max(500, len(task_order_chart) * 40),
+                    margin=dict(l=300, r=20, t=56, b=88),
+                    legend=dict(
+                        orientation="h",
+                        yanchor="top",
+                        y=-0.14,
+                        xanchor="center",
+                        x=0.5,
+                        font=dict(family=_plot_font, size=11, color=_toss_body),
+                        bgcolor="rgba(255,255,255,0.92)",
+                        bordercolor=_toss_line_gray,
+                        borderwidth=1,
+                    ),
+                )
+
+                for _night_day in (e_d - timedelta(days=1), e_d):
+                    t_n0 = pd.Timestamp(datetime.combine(_night_day, datetime.min.time()))
+                    t_n1 = t_n0 + pd.Timedelta(hours=7, minutes=59, seconds=59)
                     fig.add_vrect(
-                        x0=_pk0,
-                        x1=_pk1,
-                        fillcolor="rgba(250, 204, 21, 0.15)",
+                        x0=t_n0,
+                        x1=t_n1,
+                        fillcolor="rgba(148, 163, 184, 0.15)",
                         layer="below",
                         line_width=0,
                         xref="x",
@@ -2968,201 +3118,154 @@ def main() -> None:
                         y0=0,
                         y1=1,
                     )
-                    _peak_lbl = "트래픽 집중"
-                    if IS_UNAUTH_DEMO:
-                        _peak_lbl = "점심·11:30~13:30" if _slot_i == 0 else "저녁·19:30~21:30"
-                    fig.add_annotation(
-                        x=_pk0 + (_pk1 - _pk0) / 2,
-                        xref="x",
-                        y=0.98,
-                        yref="paper",
-                        text=_peak_lbl,
-                        showarrow=False,
-                        font=dict(family=_plot_font, size=9, color="#CA8A04"),
-                        yanchor="top",
+
+                _peak_slots = ((11, 30, 13, 30), (19, 30, 21, 30))
+                for _pd in (e_d - timedelta(days=1), e_d):
+                    _day0 = pd.Timestamp(datetime.combine(_pd, datetime.min.time()))
+                    for _slot_i, (_h0, _m0, _h1, _m1) in enumerate(_peak_slots):
+                        _pk0 = _day0 + pd.Timedelta(hours=_h0, minutes=_m0)
+                        _pk1 = _day0 + pd.Timedelta(hours=_h1, minutes=_m1)
+                        fig.add_vrect(
+                            x0=_pk0,
+                            x1=_pk1,
+                            fillcolor="rgba(250, 204, 21, 0.15)",
+                            layer="below",
+                            line_width=0,
+                            xref="x",
+                            yref="paper",
+                            y0=0,
+                            y1=1,
+                        )
+                        _peak_lbl = "트래픽 집중"
+                        if IS_UNAUTH_DEMO:
+                            _peak_lbl = "점심·11:30~13:30" if _slot_i == 0 else "저녁·19:30~21:30"
+                        fig.add_annotation(
+                            x=_pk0 + (_pk1 - _pk0) / 2,
+                            xref="x",
+                            y=0.98,
+                            yref="paper",
+                            text=_peak_lbl,
+                            showarrow=False,
+                            font=dict(family=_plot_font, size=9, color="#CA8A04"),
+                            yanchor="top",
+                        )
+
+                # 5. 자정(00:00) 오늘 시작 선 긋기
+                midnight_ts = pd.Timestamp(datetime.combine(e_d, datetime.min.time()))
+                fig.add_vline(
+                    x=midnight_ts,
+                    line_width=1.25,
+                    line_dash="solid",
+                    line_color="rgba(139, 149, 161, 0.35)",
+                )
+                fig.add_annotation(
+                    x=midnight_ts,
+                    y=1.02,
+                    xref="x",
+                    yref="paper",
+                    text=f"📅 {e_d.month}/{e_d.day} 시작",
+                    showarrow=False,
+                    font=dict(family=_plot_font, size=10, color=_toss_sub),
+                    xanchor="left",
+                    bgcolor="rgba(242, 244, 246, 0.95)",
+                    bordercolor=_toss_line_gray,
+                    borderwidth=1,
+                    borderpad=5,
+                )
+
+                # 6. 현재 시점 선 긋기
+                ref_ts = _reference_guide_timestamp(action_df, e_d, day_start, day_end)
+                fig.add_shape(
+                    type="line",
+                    x0=ref_ts,
+                    x1=ref_ts,
+                    y0=0,
+                    y1=1,
+                    xref="x",
+                    yref="paper",
+                    line=dict(color="rgba(49, 130, 246, 0.55)", width=1.25, dash="dot"),
+                )
+                fig.add_annotation(
+                    x=ref_ts,
+                    y=1.02,
+                    xref="x",
+                    yref="paper",
+                    text="현재",
+                    showarrow=False,
+                    font=dict(family=_plot_font, size=10, color=_toss_title),
+                    xanchor="right",
+                    bgcolor="rgba(49, 130, 246, 0.08)",
+                    bordercolor="rgba(49, 130, 246, 0.25)",
+                    borderwidth=1,
+                    borderpad=5,
+                )
+
+                # [혁신적 우회법] Streamlit의 80KB 청크 절단 버그를 원천 봉쇄                # [혁신적 우회법] Streamlit의 80KB 청크 절단 버그를 원천 봉쇄
+                # scrollZoom=False: 휠이 차트 확대가 아니라 페이지 세로 스크롤에 가깝게 동작
+                html_str = fig.to_html(
+                    include_plotlyjs="cdn",
+                    full_html=True,
+                    config={"displayModeBar": True, "scrollZoom": False, "displaylogo": False},
+                )
+                b64_html = base64.b64encode(html_str.encode("utf-8")).decode("utf-8")
+                _chart_h = 750
+                st.markdown(
+                    f'<iframe src="data:text/html;base64,{b64_html}" '
+                    f'width="100%" height="{_chart_h}" '
+                    f'style="border:none; overflow:hidden;"></iframe>',
+                    unsafe_allow_html=True,
+                )
+        with tab_ms:
+            st.markdown("#### 🏆 단지 내 시장 점유율 (M/S) Top 10")
+            st.caption("파워점수 공식 = 기본(10) + 순위가점(10/순위) + 물량가점(묶음개수*0.1)")
+
+            c_m1, c_m2 = st.columns([1, 1.2])
+            if not ms_df.empty:
+                ms_df = ms_df.copy()
+                ms_df["부동산명_축약"] = ms_df["부동산명"].apply(
+                    lambda x: mask_text(
+                        clean_realtor_name(x),
+                        is_demo=IS_DEMO_MODE,
+                        filter_realtor_name=filter_realtor_name,
+                        display_realtor=display_realtor,
+                    )
+                )
+                top10_ms = ms_df.sort_values("총점수", ascending=False).head(10)
+
+                with c_m1:
+                    st.dataframe(
+                        top10_ms[["부동산명_축약", "매물건수", "총점수"]],
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                with c_m2:
+                    top10_ms_chart = top10_ms.sort_values("총점수", ascending=True)
+                    cleaned_my_realtor = clean_realtor_name(display_realtor)
+                    top10_ms_chart = top10_ms_chart.copy()
+                    top10_ms_chart["색상"] = top10_ms_chart["부동산명_축약"].apply(
+                        lambda x: "#3B82F6" if x == cleaned_my_realtor else "#E2E8F0"
                     )
 
-            # 5. 자정(00:00) 오늘 시작 선 긋기
-            midnight_ts = pd.Timestamp(datetime.combine(e_d, datetime.min.time()))
-            fig.add_vline(
-                x=midnight_ts,
-                line_width=1.25,
-                line_dash="solid",
-                line_color="rgba(139, 149, 161, 0.35)",
-            )
-            fig.add_annotation(
-                x=midnight_ts,
-                y=1.02,
-                xref="x",
-                yref="paper",
-                text=f"📅 {e_d.month}/{e_d.day} 시작",
-                showarrow=False,
-                font=dict(family=_plot_font, size=10, color=_toss_sub),
-                xanchor="left",
-                bgcolor="rgba(242, 244, 246, 0.95)",
-                bordercolor=_toss_line_gray,
-                borderwidth=1,
-                borderpad=5,
-            )
-
-            # 6. 현재 시점 선 긋기
-            ref_ts = _reference_guide_timestamp(action_df, e_d, day_start, day_end)
-            fig.add_shape(
-                type="line",
-                x0=ref_ts,
-                x1=ref_ts,
-                y0=0,
-                y1=1,
-                xref="x",
-                yref="paper",
-                line=dict(color="rgba(49, 130, 246, 0.55)", width=1.25, dash="dot"),
-            )
-            fig.add_annotation(
-                x=ref_ts,
-                y=1.02,
-                xref="x",
-                yref="paper",
-                text="현재",
-                showarrow=False,
-                font=dict(family=_plot_font, size=10, color=_toss_title),
-                xanchor="right",
-                bgcolor="rgba(49, 130, 246, 0.08)",
-                bordercolor="rgba(49, 130, 246, 0.25)",
-                borderwidth=1,
-                borderpad=5,
-            )
-
-            # 7. AI 추천 시각 마커 — 별(star) 통일, 1순위 빨강 / 2순위 주황 (Task별 광고 추천 시간)
-            mx1, my1, m_adv1 = [], [], []
-            mx2, my2, m_adv2 = [], [], []
-            for t in task_order:
-                r = sort_info[t][3]
-                if r is None:
-                    continue
-                advice = r.get("광고 추천 시간")
-                advice_s = str(advice or "")
-                ts1 = _ai_rec_ts_in_48h_window(advice_s, e_d, day_start, day_end)
-                if ts1:
-                    mx1.append(ts1)
-                    my1.append(t)
-                    m_adv1.append(advice_s)
-                ts2 = _ai_secondary_ts_in_48h_window(advice_s, e_d, day_start, day_end)
-                if ts2:
-                    mx2.append(ts2)
-                    my2.append(t)
-                    m_adv2.append(advice_s)
-
-            _ai_star_1 = "#EF4444"
-            _ai_star_2 = "#F59E0B"
-            if mx1:
-                fig.add_trace(go.Scatter(
-                    x=mx1,
-                    y=my1,
-                    mode="markers",
-                    marker=dict(
-                        symbol="star",
-                        size=13,
-                        color=_ai_star_1,
-                        line=dict(color="white", width=1.5),
-                    ),
-                    customdata=m_adv1,
-                    name="AI 1순위 추천",
-                    hovertemplate="%{y}<br>%{customdata}<extra></extra>",
-                ))
-
-            if mx2:
-                fig.add_trace(go.Scatter(
-                    x=mx2,
-                    y=my2,
-                    mode="markers",
-                    marker=dict(
-                        symbol="star",
-                        size=13,
-                        color=_ai_star_2,
-                        line=dict(color="white", width=1.5),
-                    ),
-                    customdata=m_adv2,
-                    name="AI 2순위 추천",
-                    hovertemplate="%{y}<br>%{customdata}<extra></extra>",
-                ))
-
-            st.markdown(
-                "<div style='font-size:0.88rem;color:#475569;margin:4px 0 8px 0;line-height:1.55;'>"
-                "⭐ <span style='color:#EF4444;font-weight:600;'>빨간색 별</span>: 1순위 타격 추천 시각 / "
-                "⭐ <span style='color:#F59E0B;font-weight:600;'>주황색 별</span>: "
-                "2순위 타격 추천 시각 (오전·오후 분리)"
-                "</div>",
-                unsafe_allow_html=True,
-            )
-            # [혁신적 우회법] Streamlit의 80KB 청크 절단 버그를 원천 봉쇄
-            # scrollZoom=False: 휠이 차트 확대가 아니라 페이지 세로 스크롤에 가깝게 동작
-            html_str = fig.to_html(
-                include_plotlyjs="cdn",
-                full_html=True,
-                config={"displayModeBar": True, "scrollZoom": False, "displaylogo": False},
-            )
-            b64_html = base64.b64encode(html_str.encode("utf-8")).decode("utf-8")
-            _chart_h = 750
-            st.markdown(
-                f'<iframe src="data:text/html;base64,{b64_html}" '
-                f'width="100%" height="{_chart_h}" '
-                f'style="border:none; overflow:hidden;"></iframe>',
-                unsafe_allow_html=True,
-            )
-
-
-
-    if True:
-        st.markdown("#### 🏆 단지 내 시장 점유율 (M/S) Top 10")
-        st.caption("파워점수 공식 = 기본(10) + 순위가점(10/순위) + 물량가점(묶음개수*0.1)")
-
-        c_m1, c_m2 = st.columns([1, 1.2])
-        if not ms_df.empty:
-            ms_df = ms_df.copy()
-            ms_df["부동산명_축약"] = ms_df["부동산명"].apply(
-                lambda x: mask_text(
-                    clean_realtor_name(x),
-                    is_demo=IS_DEMO_MODE,
-                    filter_realtor_name=filter_realtor_name,
-                    display_realtor=display_realtor,
-                )
-            )
-            top10_ms = ms_df.sort_values("총점수", ascending=False).head(10)
-
-            with c_m1:
-                st.dataframe(
-                    top10_ms[["부동산명_축약", "매물건수", "총점수"]],
-                    use_container_width=True,
-                    hide_index=True,
-                )
-            with c_m2:
-                top10_ms_chart = top10_ms.sort_values("총점수", ascending=True)
-                cleaned_my_realtor = clean_realtor_name(display_realtor)
-                top10_ms_chart = top10_ms_chart.copy()
-                top10_ms_chart["색상"] = top10_ms_chart["부동산명_축약"].apply(
-                    lambda x: "#3B82F6" if x == cleaned_my_realtor else "#E2E8F0"
-                )
-
-                fig_ms = px.bar(
-                    top10_ms_chart,
-                    x="총점수",
-                    y="부동산명_축약",
-                    orientation="h",
-                    text="총점수",
-                )
-                fig_ms.update_traces(
-                    marker_color=top10_ms_chart["색상"], textposition="outside"
-                )
-                fig_ms.update_layout(
-                    height=350,
-                    margin=dict(t=0, b=0, l=0, r=0),
-                    xaxis_visible=False,
-                    yaxis_title="",
-                    plot_bgcolor="rgba(0,0,0,0)",
-                )
-                st.plotly_chart(fig_ms, use_container_width=True, config={"displayModeBar": False})
-        else:
-            st.info("점유율 데이터가 없습니다.")
+                    fig_ms = px.bar(
+                        top10_ms_chart,
+                        x="총점수",
+                        y="부동산명_축약",
+                        orientation="h",
+                        text="총점수",
+                    )
+                    fig_ms.update_traces(
+                        marker_color=top10_ms_chart["색상"], textposition="outside"
+                    )
+                    fig_ms.update_layout(
+                        height=350,
+                        margin=dict(t=0, b=0, l=0, r=0),
+                        xaxis_visible=False,
+                        yaxis_title="",
+                        plot_bgcolor="rgba(0,0,0,0)",
+                    )
+                    st.plotly_chart(fig_ms, use_container_width=True, config={"displayModeBar": False})
+            else:
+                st.info("점유율 데이터가 없습니다.")
 
     st.sidebar.markdown("---")
     st.sidebar.subheader("🤖 탑랭크 AI 비서")
@@ -3183,14 +3286,17 @@ def main() -> None:
     gc1, gc2, gc3 = st.sidebar.columns(3)
     with gc1:
         if st.button("⏱️ 시간 추천 원리", key="guide_btn_time", use_container_width=True):
+            log_user_action("3. 버튼 클릭: 시간 추천 원리")
             st.session_state.guide_messages.append({"role": "assistant", "content": _GUIDE_REPLY_TIME})
             st.rerun()
     with gc2:
         if st.button("💯 점수 계산 방식", key="guide_btn_score", use_container_width=True):
+            log_user_action("3. 버튼 클릭: 점수 계산 방식")
             st.session_state.guide_messages.append({"role": "assistant", "content": _GUIDE_REPLY_SCORE})
             st.rerun()
     with gc3:
         if st.button("🌙 심야 시간 제외?", key="guide_btn_night", use_container_width=True):
+            log_user_action("3. 버튼 클릭: 심야 시간 제외")
             st.session_state.guide_messages.append({"role": "assistant", "content": _GUIDE_REPLY_NIGHT})
             st.rerun()
 

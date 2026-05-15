@@ -16,6 +16,7 @@ LISTING_SOP_KEYS = [
     "거래방식",
     "가격",
     "CP사",
+    "방향",
 ]
 
 # 광고 빈도 등급·경쟁사 분석 공통: 최근 28일(일요일 제외는 행 필터에서 처리)
@@ -204,7 +205,7 @@ def _infer_exposure_type(df):
 def build_listing_tracking_keys(df, time_col="수집일시"):
     """
     최종 시계열 트래킹 키 생성 (SOP 정렬):
-    - 최종스펙키: 부동산명_통합 + 단지명 + 동/호수 + 층/타입 + 거래방식 + 가격 + CP사
+    - 최종스펙키: 부동산명_통합 + 단지명 + 동/호수 + 층/타입 + 거래방식 + 가격 + CP사 + 방향
       (노출형태는 키에서 제외 — 갱신 중 변경 가능)
     """
     start_t = time.time()
@@ -230,6 +231,14 @@ def build_listing_tracking_keys(df, time_col="수집일시"):
         if c not in out.columns:
             out[c] = ""
         out[c] = out[c].fillna("").astype(str).str.strip()
+    if "방향" not in out.columns:
+        out["방향"] = ""
+    out["방향"] = out["방향"].fillna("").astype(str).str.strip()
+    direction_from_floor = out["층/타입"].str.extract(
+        r"(남동향|남서향|북동향|북서향|동향|서향|남향|북향)",
+        expand=False,
+    ).fillna("")
+    out["방향"] = out["방향"].where(out["방향"].astype(bool), direction_from_floor)
 
     if "가격" not in out.columns:
         out["가격"] = ""
@@ -252,6 +261,8 @@ def build_listing_tracking_keys(df, time_col="수집일시"):
         + out["_가격키"]
         + " | "
         + out["CP사"].fillna("").astype(str).str.strip()
+        + " | "
+        + out["방향"].fillna("").astype(str).str.strip()
     )
 
     if "고유번호" not in out.columns:
