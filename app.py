@@ -59,25 +59,9 @@ def log_user_action(action_detail: str) -> None:
 # 엑셀 열 인덱스(0-based): N열 = CP사 — 멀티 CP 광고 핑퐁 노이즈 방지용 식별자
 COL_CP = 13
 
-_GUIDE_REPLY_TIME = (
-    "최근 28일(4주) 치의 타사 활동 데이터를 분석합니다. 특히 최근 활동에 가중치를 주어 최신 트렌드를 반영합니다. "
-    "경쟁사가 갱신을 멈추는 '빈집' 구간을 찾고, 그 구간이 점심(11~13시)이나 저녁(19~21시) 같은 "
-    "피크 타임을 얼마나 길게 독점할 수 있는지 계산하여 가장 효율이 높은 타격 시간을 추천합니다."
-)
-_GUIDE_REPLY_SCORE = (
-    "현재 노출 범위(48시간) 내에서 심야 시간을 제외한 실 영업시간 중 대표님의 매물이 "
-    "1~3위 상위권(방호 성공)을 안전하게 지켜낸 시간의 비율입니다. "
-    "타임라인의 파란색 막대가 촘촘하고 길수록 점수가 100점에 가까워지며, "
-    "경쟁사 진입으로 밀려난 시간만큼 점수가 차감됩니다."
-)
-_GUIDE_REPLY_NIGHT = (
-    "네이버 부동산 방문객이 거의 없는 **00시부터 08시까지의 심야 시간**은 노출되어도 효과가 없기 때문에 "
-    "점수 계산과 예상 노출 시간에서 **완전히 제외(0시간 처리)**합니다. 오직 진짜 영업시간에만 집중합니다."
-)
-
 _CUSTOMER_WHITEPAPER_MD = """
 📘 탑랭크 AI 핵심 활용 백서
-💡 본 시스템은 네이버 부동산 데이터를 크롤링하여 분석하므로, 상세 동/호수 대신 네이버 부동산에 기재된 스펙(동, 층수, 면적, 가격, 방향)으로 매물을 식별합니다. 
+💡 본 시스템은 네이버 부동산 데이터를 크롤링하여 분석하므로, 상세 동/호수 대신 네이버 부동산에 기재된 스펙(동, 층수, 면적, 가격, 방향)으로 매물을 식별합니다.
 
 🔍 기본 사용법
 단지 선택: 화면 왼쪽 상단에서 분석하고자 하는 아파트 단지명을 선택할 수 있습니다.
@@ -91,37 +75,7 @@ _CUSTOMER_WHITEPAPER_MD = """
 📊 점유율 타임라인: 최근 48시간 동안 내 매물이 상위권을 지킨 구간(파란색)과 경쟁사에 밀린 구간(회색)을 가로 막대로 시각화하여, 내가 밀린 시점에 어떤 경쟁업체가 1위를 차지했는지 추적합니다.
 📈 일간 점수 트렌드: 매일 우리 매물이 상위권을 얼마나 잘 방어했는지 일자별 점수 추이를 그래프로 보여주어 2주간의 광고 효율의 흐름을 파악합니다.
 🍩 단지 내 시장 점유율: 해당 단지 전체 광고 지분 중 우리 부동산과 경쟁사들이 각각 몇 %의 점유율을 나누어 먹고 있는지 한눈에 비교합니다.
-
----
-
-### 🚀 AWS 라이트세일 서버 Push 과정 리마인드
-
-로컬 컴퓨터에서 수정을 마치고 대시보드가 스냅처럼 빨라진 것을 확인하셨다면, 아래 단계로 서버에 배포하시면 됩니다.
-
-#### 1단계: 로컬(데스크톱 / Cursor) 터미널
-```powershell
-# 1. 수정된 모든 변경사항 무대 위로 올리기
-git add .
-
-# 2. 어떤 작업을 했는지 명시하여 커밋 생성
-git commit -m "ui: optimize ai response speed and update user guidebook"
-
-# 3. 깃허브 원격 저장소로 강제 밀어내기 (안전하게 내 코드로 고정)
-git push origin main --force
-```
 """
-
-
-def _guide_md_fragments_to_html(text: str) -> str:
-    """`**굵게**`만 허용하고 나머지는 이스케이프."""
-    parts = re.split(r"(\*\*.+?\*\*)", text)
-    out: list[str] = []
-    for p in parts:
-        if len(p) >= 4 and p.startswith("**") and p.endswith("**"):
-            out.append("<strong>" + html.escape(p[2:-2]) + "</strong>")
-        else:
-            out.append(html.escape(p))
-    return "".join(out).replace("\n", "<br/>")
 
 
 def _extract_area_key(floor_type_text):
@@ -2648,17 +2602,6 @@ def main() -> None:
         if raw_df is not None and target_complexes:
             raw_df = raw_df[raw_df["단지명"].isin(target_complexes)].copy()
 
-    if "guide_messages" not in st.session_state:
-        st.session_state.guide_messages = [
-            {
-                "role": "assistant",
-                "content": (
-                    "대표님, 탑랭크 AI 비서입니다. 대시보드의 원리가 궁금하시다면 아래 버튼을 눌러주세요."
-                ),
-            },
-            {"role": "assistant", "content": _CUSTOMER_WHITEPAPER_MD},
-        ]
-
     if raw_df is None:
         st.error(f"데이터 파일을 찾지 못했습니다. 경로: `{DATA_DIR}`")
         st.stop()
@@ -3294,36 +3237,6 @@ def main() -> None:
                     st.plotly_chart(fig_ms, use_container_width=True, config={"displayModeBar": False})
             else:
                 st.info("점유율 데이터가 없습니다.")
-
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("🤖 탑랭크 AI 비서")
-
-    _guide_scroll_html = (
-        '<div style="max-height:min(42vh,360px);overflow-y:auto;overflow-x:hidden;padding:10px 8px;'
-        'border:1px solid #E2E8F0;border-radius:10px;background:#FFFFFF;margin-bottom:10px;line-height:1.55;">'
-        + "".join(
-            '<div style="margin-bottom:12px;font-size:0.84rem;color:#334155;">'
-            + _guide_md_fragments_to_html(msg["content"])
-            + "</div>"
-            for msg in st.session_state.guide_messages
-        )
-        + "</div>"
-    )
-    st.sidebar.markdown(_guide_scroll_html, unsafe_allow_html=True)
-
-    gc1, gc2, gc3 = st.sidebar.columns(3)
-    with gc1:
-        if st.button("⏱️ 시간 추천 원리", key="guide_btn_time", use_container_width=True):
-            st.session_state.guide_messages.append({"role": "assistant", "content": _GUIDE_REPLY_TIME})
-            st.rerun()
-    with gc2:
-        if st.button("💯 점수 계산 방식", key="guide_btn_score", use_container_width=True):
-            st.session_state.guide_messages.append({"role": "assistant", "content": _GUIDE_REPLY_SCORE})
-            st.rerun()
-    with gc3:
-        if st.button("🌙 심야 시간 제외?", key="guide_btn_night", use_container_width=True):
-            st.session_state.guide_messages.append({"role": "assistant", "content": _GUIDE_REPLY_NIGHT})
-            st.rerun()
 
 if __name__ == "__main__":
     main()
