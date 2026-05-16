@@ -126,12 +126,16 @@ except ImportError:
 # 🚀 깃허브 자동 업로드 엔진
 # ======================================================
 def auto_github_push(target_filename, log_func=None):
-    token = "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"
+    token = os.environ.get("GITHUB_TOKEN", "").strip()
     repo = "birossarts9/realestate-date-report"
     file_path = os.path.join(BASE_DIR, target_filename)
     url = f"https://api.github.com/repos/{repo}/contents/{target_filename}"
 
     try:
+        if not token:
+            if log_func: log_func("❌ 깃허브 토큰이 없습니다. GITHUB_TOKEN 환경변수를 설정하세요.")
+            return
+
         if not os.path.exists(file_path):
             if log_func: log_func(f"❌ 업로드할 {target_filename} 파일이 없습니다.")
             return
@@ -177,7 +181,7 @@ def upload_to_aws(target_filename, log_func=None):
     # Lightsail 접속용 .pem 키는 market_crawler.py와 같은 폴더에 둡니다.
     key_path = os.path.join(BASE_DIR, "LightsailDefaultKey-ap-northeast-2.pem")
     local_path = os.path.join(BASE_DIR, target_filename)
-    remote_path = f"/home/ubuntu/{target_filename}"
+    remote_path = f"/home/ubuntu/cursor/{target_filename}"
     ssh = None
     sftp = None
 
@@ -612,17 +616,52 @@ class MarketSweepWorker:
                             df_old[col] = ""
                     df_old = df_old[LEGACY_COL_ORDER].astype(str)
                     df_comb = pd.concat([df_old, df_new], ignore_index=True).drop_duplicates()
-                    df_comb.to_excel(fname, index=False)
+                    
+                    # [안전장치] 엑셀 저장 권한 에러 처리
+                    try:
+                        df_comb.to_excel(fname, index=False)
+                    except PermissionError:
+                        counter = 1
+                        while True:
+                            alt_filename = f"naver_market_report_{month_str}({counter}).xlsx"
+                            alt_fname = os.path.join(BASE_DIR, alt_filename)
+                            try:
+                                df_comb.to_excel(alt_fname, index=False)
+                                target_filename = alt_filename
+                                fname = alt_fname
+                                self.send_log(f"⚠️ 원본 엑셀이 열려 있어 새 이름으로 저장했습니다: {target_filename}")
+                                break
+                            except PermissionError:
+                                counter += 1
+                                if counter > 20: raise  # 무한루프 방지
+                                
                     df_comb.to_parquet(parquet_fname, index=False)
                 else:
-                    df_new.to_excel(fname, index=False)
+                    try:
+                        df_new.to_excel(fname, index=False)
+                    except PermissionError:
+                        counter = 1
+                        while True:
+                            alt_filename = f"naver_market_report_{month_str}({counter}).xlsx"
+                            alt_fname = os.path.join(BASE_DIR, alt_filename)
+                            try:
+                                df_new.to_excel(alt_fname, index=False)
+                                target_filename = alt_filename
+                                fname = alt_fname
+                                self.send_log(f"⚠️ 원본 엑셀이 열려 있어 새 이름으로 저장했습니다: {target_filename}")
+                                break
+                            except PermissionError:
+                                counter += 1
+                                if counter > 20: raise
                     df_new.to_parquet(parquet_fname, index=False)
 
                 save_time_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 self.send_log(f"\n💾 [{save_time_str}] 수집 및 엑셀/파케이 저장 완료! (총 {len(df_new)}행)")
+                
                 self.send_log("⏳ 깃허브 서버로 데이터 자동 전송 중...")
                 auto_github_push(target_filename, self.send_log)
                 auto_github_push(target_parquet_filename, self.send_log)
+                
                 self.send_log("⏳ AWS Lightsail 서버로 파케이 데이터 전송 중...")
                 upload_to_aws(target_parquet_filename, self.send_log)
                 break

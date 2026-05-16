@@ -60,13 +60,15 @@ def log_user_action(action_detail: str) -> None:
 COL_CP = 13
 
 _GUIDE_REPLY_TIME = (
-    "최근 **28일(4주) 치의 타사 활동 데이터**를 분석합니다. 특히 최근 4일의 활동엔 가중치를 2배로 주어 최신 트렌드를 반영합니다. "
-    "경쟁사가 갱신을 멈추는 **'빈집'** 구간을 찾고, 그 구간이 점심(11~13시)이나 저녁(19~21시) 같은 "
-    "**피크 타임을 얼마나 길게 독점할 수 있는지 계산**하여 가장 효율이 높은 타격 시간을 추천합니다."
+    "최근 28일(4주) 치의 타사 활동 데이터를 분석합니다. 특히 최근 활동에 가중치를 주어 최신 트렌드를 반영합니다. "
+    "경쟁사가 갱신을 멈추는 '빈집' 구간을 찾고, 그 구간이 점심(11~13시)이나 저녁(19~21시) 같은 "
+    "피크 타임을 얼마나 길게 독점할 수 있는지 계산하여 가장 효율이 높은 타격 시간을 추천합니다."
 )
 _GUIDE_REPLY_SCORE = (
-    "현재 화면에 보이는 **48시간** 동안 대표님의 매물이 1~3위 상위권에 안전하게 떠 있던 시간의 비율입니다. "
-    "화면의 **초록색 막대**가 길수록 점수가 100점에 가까워집니다."
+    "현재 노출 범위(48시간) 내에서 심야 시간을 제외한 실 영업시간 중 대표님의 매물이 "
+    "1~3위 상위권(방호 성공)을 안전하게 지켜낸 시간의 비율입니다. "
+    "타임라인의 파란색 막대가 촘촘하고 길수록 점수가 100점에 가까워지며, "
+    "경쟁사 진입으로 밀려난 시간만큼 점수가 차감됩니다."
 )
 _GUIDE_REPLY_NIGHT = (
     "네이버 부동산 방문객이 거의 없는 **00시부터 08시까지의 심야 시간**은 노출되어도 효과가 없기 때문에 "
@@ -74,14 +76,39 @@ _GUIDE_REPLY_NIGHT = (
 )
 
 _CUSTOMER_WHITEPAPER_MD = """
-### 1. 타임라인 차트에는 어떤 매물이 뜨나요?
-최근 48시간 이내에 상위권(1~3위)에 진입했거나, 밀려난 **'활동 이력'이 있는 매물만** 표시합니다. 48시간 내내 광고 갱신이 없었던 방치 매물은 차트에서 제외하여 핵심에만 집중합니다.
+📘 탑랭크 AI 핵심 활용 백서
+💡 본 시스템은 네이버 부동산 데이터를 크롤링하여 분석하므로, 상세 동/호수 대신 네이버 부동산에 기재된 스펙(동, 층수, 면적, 가격, 방향)으로 매물을 식별합니다. 
 
-### 2. ⭐ 추천 시간(타격 시각)은 어떻게 정해지나요?
-최근 **28일(4주) 치**의 타사 갱신 패턴을 정밀 분석합니다. 경쟁사가 갱신을 멈추는 **'빈집'** 구간을 찾고, 그 구간이 네이버 부동산 방문객이 가장 많은 **피크 타임(점심/저녁)을 얼마나 길게 독점할 수 있는지** 계산하여 가장 효율이 높은 타격 시간을 추천합니다.
+🔍 기본 사용법
+단지 선택: 화면 왼쪽 상단에서 분석하고자 하는 아파트 단지명을 선택할 수 있습니다.
 
-### 3. 🌙 심야 시간은 왜 제외되나요?
-방문객이 거의 없는 **00시부터 08시까지의 심야 시간**은 노출되어도 효과가 떨어집니다. 따라서 AI 점수 계산과 예상 노출 시간 합산에서 심야 시간은 **완전히 제외(0초 처리)**하여, 오직 진짜 영업시간의 효율만 측정합니다.
+🎯 광고 전술판 실전 활용법
+상세보기: 매물 하단의 상세보기를 누르면 경쟁사들이 몇 시 몇 분에 광고를 했는지 파악할 수 있습니다.
+⏳ 대기 권장: 경쟁사들이 아직 오늘 자 광고 갱신을 시작하지 않은 상태입니다. 이때 먼저 광고를 올리면 나중에 밀릴 수 있으므로, 상태가 '지금 광고'로 바뀔 때까지 대기해야 합니다.
+🚀 지금 광고: 경쟁사들이 오늘 광고 세팅을 모두 완료한 최적의 타이밍입니다. 지금 즉시 광고를 올리면 상위권을 가장 오랜 시간 독점할 수 있습니다.
+
+📌 탭별 기능 안내
+📊 점유율 타임라인: 최근 48시간 동안 내 매물이 상위권을 지킨 구간(파란색)과 경쟁사에 밀린 구간(회색)을 가로 막대로 시각화하여, 내가 밀린 시점에 어떤 경쟁업체가 1위를 차지했는지 추적합니다.
+📈 일간 점수 트렌드: 매일 우리 매물이 상위권을 얼마나 잘 방어했는지 일자별 점수 추이를 그래프로 보여주어 2주간의 광고 효율의 흐름을 파악합니다.
+🍩 단지 내 시장 점유율: 해당 단지 전체 광고 지분 중 우리 부동산과 경쟁사들이 각각 몇 %의 점유율을 나누어 먹고 있는지 한눈에 비교합니다.
+
+---
+
+### 🚀 AWS 라이트세일 서버 Push 과정 리마인드
+
+로컬 컴퓨터에서 수정을 마치고 대시보드가 스냅처럼 빨라진 것을 확인하셨다면, 아래 단계로 서버에 배포하시면 됩니다.
+
+#### 1단계: 로컬(데스크톱 / Cursor) 터미널
+```powershell
+# 1. 수정된 모든 변경사항 무대 위로 올리기
+git add .
+
+# 2. 어떤 작업을 했는지 명시하여 커밋 생성
+git commit -m "ui: optimize ai response speed and update user guidebook"
+
+# 3. 깃허브 원격 저장소로 강제 밀어내기 (안전하게 내 코드로 고정)
+git push origin main --force
+```
 """
 
 
@@ -569,7 +596,7 @@ def _determine_action_state(
     hh, mm = ai_primary
     ai_hhmm = f"{hh:02d}:{mm:02d}"
 
-    # (A) AI 추천 시각에 도달했거나 이미 지났음 → 즉시 타격
+    # (A) AI 추천 시각에 도달했거나 이미 지났음 → 지금 광고
     if diff_min <= _AI_REACH_GRACE_MINUTES:
         if not any_waiting:
             reason = (
@@ -638,7 +665,7 @@ def _render_action_card(
         palette = {"bg": "#FFFFFF", "border": "#E11D48", "text": "#9F1239"}
         summary_text = f"현재 감시 중인 총 {total_watch}곳 중 {waiting_watch}곳이 아직 갱신 대기 중입니다."
     else:
-        title = "🚀 즉시 타격 (경쟁사 활동 종료)"
+        title = "🚀 지금 광고 (경쟁사 활동 종료)"
         palette = {"bg": "#FFFFFF", "border": "#185294", "text": "#113A6A"}
         summary_text = f"감시 중인 {total_watch}곳이 모두 오늘 갱신을 마쳤습니다. 지금이 가장 안전한 타점입니다."
 
@@ -686,7 +713,7 @@ def _action_urgency_rank(action: dict) -> int:
     return {"STRIKE": 0, "WAIT": 1, "FREE": 2}.get(str(action.get("status", "")), 9)
 
 
-_TASK_SORT_OPTIONS = ("이름 오름차순", "광고 횟수 내림차순")
+_TASK_SORT_OPTIONS = ("광고 횟수 순", "이름 오름차순")
 
 
 def _dong_ho_sort_key(task: str) -> str:
@@ -720,7 +747,7 @@ def _sort_tracking_tasks(
     action_df: pd.DataFrame,
     sort_mode: str,
 ) -> list[str]:
-    """tracking Task 목록 정렬 — 기본은 이름(동/호) 오름차순."""
+    """tracking Task 목록 정렬 — 기본은 광고 횟수 순, 보조 옵션은 이름 오름차순."""
     items = [str(t) for t in tasks if str(t).strip()]
     if sort_mode == "이름 오름차순":
         return sorted(items, key=_dong_ho_sort_key, reverse=False)
@@ -754,7 +781,7 @@ def _status_badge_from_action(action: dict) -> tuple[str, str]:
     """(표시 라벨, 포인트 컬러)"""
     st_code = str(action.get("status", "FREE"))
     if st_code == "STRIKE":
-        return "🚀 즉시 타격", "#185294"
+        return "🚀 지금 광고", "#185294"
     if st_code == "WAIT":
         return "🛑 대기 권장", "#E11D48"
     return "✅ 자유 갱신", "#25B196"
@@ -2628,7 +2655,8 @@ def main() -> None:
                 "content": (
                     "대표님, 탑랭크 AI 비서입니다. 대시보드의 원리가 궁금하시다면 아래 버튼을 눌러주세요."
                 ),
-            }
+            },
+            {"role": "assistant", "content": _CUSTOMER_WHITEPAPER_MD},
         ]
 
     if raw_df is None:
@@ -2767,7 +2795,7 @@ def main() -> None:
 
         tab_command, tab_timeline, tab_trend, tab_ms = st.tabs(
             [
-                "📡 전술 지휘 통제 센터",
+                "📡 광고 전술판",
                 "📊 점유율 타임라인",
                 "📈 일간 점수 트렌드",
                 "🏆 단지 내 시장 점유율 (M/S)",
@@ -2777,7 +2805,7 @@ def main() -> None:
 
         with tab_command:
             _cmd_sort_mode = _render_tracking_tab_header(
-                "<h3 style='color:#0F172A;margin:0 0 4px 0;'>📡 전술 지휘 통제 센터</h3>",
+                "<h3 style='color:#0F172A;margin:0 0 4px 0;'>📡 광고 전술판</h3>",
                 widget_key="tl_task_sort_command",
             )
             if tl_plot.empty:
@@ -3286,17 +3314,14 @@ def main() -> None:
     gc1, gc2, gc3 = st.sidebar.columns(3)
     with gc1:
         if st.button("⏱️ 시간 추천 원리", key="guide_btn_time", use_container_width=True):
-            log_user_action("3. 버튼 클릭: 시간 추천 원리")
             st.session_state.guide_messages.append({"role": "assistant", "content": _GUIDE_REPLY_TIME})
             st.rerun()
     with gc2:
         if st.button("💯 점수 계산 방식", key="guide_btn_score", use_container_width=True):
-            log_user_action("3. 버튼 클릭: 점수 계산 방식")
             st.session_state.guide_messages.append({"role": "assistant", "content": _GUIDE_REPLY_SCORE})
             st.rerun()
     with gc3:
         if st.button("🌙 심야 시간 제외?", key="guide_btn_night", use_container_width=True):
-            log_user_action("3. 버튼 클릭: 심야 시간 제외")
             st.session_state.guide_messages.append({"role": "assistant", "content": _GUIDE_REPLY_NIGHT})
             st.rerun()
 
