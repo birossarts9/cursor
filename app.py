@@ -21,6 +21,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 from data_fetcher import (
     DATA_DIR,
     clean_realtor_name,
@@ -60,20 +61,19 @@ def log_user_action(action_detail: str) -> None:
 COL_CP = 13
 
 _CUSTOMER_WHITEPAPER_MD = """
-📘 탑랭크 AI 핵심 활용 백서
 💡 본 시스템은 네이버 부동산 데이터를 크롤링하여 분석하므로, 상세 동/호수 대신 네이버 부동산에 기재된 스펙(동, 층수, 면적, 가격, 방향)으로 매물을 식별합니다.
 
-🔍 기본 사용법
+🔍 기본 사용법  
 단지 선택: 화면 왼쪽 상단에서 분석하고자 하는 아파트 단지명을 선택할 수 있습니다.
 
-🎯 광고 전술판 실전 활용법
-상세보기: 매물 하단의 상세보기를 누르면 경쟁사들이 몇 시 몇 분에 광고를 했는지 파악할 수 있습니다.
-⏳ 대기 권장: 경쟁사들이 아직 오늘 자 광고 갱신을 시작하지 않은 상태입니다. 이때 먼저 광고를 올리면 나중에 밀릴 수 있으므로, 상태가 '지금 광고'로 바뀔 때까지 대기해야 합니다.
+🎯 광고 전술판 실전 활용법  
+상세보기: 매물 하단의 상세보기를 누르면 경쟁사들이 몇 시 몇 분에 광고를 했는지 파악할 수 있습니다.  
+⏳ 대기 권장: 경쟁사들이 아직 오늘 자 광고 갱신을 시작하지 않은 상태입니다. 이때 먼저 광고를 올리면 나중에 밀릴 수 있으므로, 상태가 '지금 광고'로 바뀔 때까지 대기해야 합니다.  
 🚀 지금 광고: 경쟁사들이 오늘 광고 세팅을 모두 완료한 최적의 타이밍입니다. 지금 즉시 광고를 올리면 상위권을 가장 오랜 시간 독점할 수 있습니다.
 
-📌 탭별 기능 안내
-📊 점유율 타임라인: 최근 48시간 동안 내 매물이 상위권을 지킨 구간(파란색)과 경쟁사에 밀린 구간(회색)을 가로 막대로 시각화하여, 내가 밀린 시점에 어떤 경쟁업체가 1위를 차지했는지 추적합니다.
-📈 일간 점수 트렌드: 매일 우리 매물이 상위권을 얼마나 잘 방어했는지 일자별 점수 추이를 그래프로 보여주어 2주간의 광고 효율의 흐름을 파악합니다.
+📌 탭별 기능 안내  
+📊 점유율 타임라인: 최근 48시간 동안 내 매물이 상위권을 지킨 구간(파란색)과 경쟁사에 밀린 구간(회색)을 가로 막대로 시각화하여, 내가 밀린 시점에 어떤 경쟁업체가 1위를 차지했는지 추적합니다.  
+📈 일간 점수 트렌드: 매일 우리 매물이 상위권을 얼마나 잘 방어했는지 일자별 점수 추이를 그래프로 보여주어 2주간의 광고 효율의 흐름을 파악합니다.  
 🍩 단지 내 시장 점유율: 해당 단지 전체 광고 지분 중 우리 부동산과 경쟁사들이 각각 몇 %의 점유율을 나누어 먹고 있는지 한눈에 비교합니다.
 """
 
@@ -824,7 +824,6 @@ def _build_target_status_for_task(
     kst_today: datetime.date,
     my_unified: str,
     is_demo_mode: bool,
-    is_unauth_demo: bool,
     filter_realtor_name: str,
     display_realtor: str,
 ) -> dict:
@@ -974,8 +973,6 @@ def _build_target_status_for_task(
                 "last_active_time": last_active_hhmm,
                 "type": "고빈도 추격조",
             }
-    if is_unauth_demo and target_status:
-        _apply_unauth_demo_watch_target_overrides(target_status)
     return target_status
 
 
@@ -2111,421 +2108,6 @@ def precompute_all_complexes_data(
     )
 
 
-def _unauth_demo_listing_specs() -> list[dict[str, str | int]]:
-    """미인증 데모 내 매물 20건(상위권 15 / 탈락 5) — 동·호는 '행복동 사랑단지 101동 1502호' 형식의 동/호수 문자열."""
-    return [
-        {"dong": "101동 1502호", "floor": "99/74m² | 고/29층 | 남향", "price": "950000000", "bundle": "1", "overall": "8", "hold": "18.2시간", "eve2": "20:08", "renew": 52, "last_up": "05/14 15:03"},
-        {"dong": "101동 1503호", "floor": "84A/84A | 중/22층 | 남향", "price": "882000000", "bundle": "2", "overall": "11", "hold": "14.6시간", "eve2": "19:44", "renew": 48, "last_up": "05/14 15:11"},
-        {"dong": "101동 1505호", "floor": "84B/84B | 저/15층 | 동향", "price": "895000000", "bundle": "1", "overall": "14", "hold": "19.5시간", "eve2": "20:31", "renew": 51, "last_up": "05/14 15:02"},
-        {"dong": "102동 1201호", "floor": "113B/84B | 12/29층 | 서향", "price": "968000000", "bundle": "3", "overall": "6", "hold": "16.9시간", "eve2": "19:39", "renew": 45, "last_up": "05/14 15:19"},
-        {"dong": "102동 1203호", "floor": "84A/84A | 고/30층 | 남서향", "price": "935000000", "bundle": "2", "overall": "19", "hold": "12.0시간", "eve2": "21:01", "renew": 41, "last_up": "05/14 15:06"},
-        {"dong": "103동 803호", "floor": "59A/59A | 중/18층 | 북향", "price": "745000000", "bundle": "1", "overall": "22", "hold": "21.3시간", "eve2": "20:52", "renew": 54, "last_up": "05/14 15:14"},
-        {"dong": "103동 905호", "floor": "113A/84A | 8/35층 | 남향", "price": "978000000", "bundle": "1", "overall": "9", "hold": "17.4시간", "eve2": "19:56", "renew": 49, "last_up": "05/14 15:08"},
-        {"dong": "104동 1402호", "floor": "84B/84B | 20/28층 | 남동향", "price": "905000000", "bundle": "2", "overall": "16", "hold": "13.8시간", "eve2": "20:17", "renew": 43, "last_up": "05/14 15:21"},
-        {"dong": "104동 1404호", "floor": "152A/152A | 24/35층 | 남향", "price": "1320000000", "bundle": "2", "overall": "25", "hold": "11.8시간", "eve2": "21:16", "renew": 39, "last_up": "05/14 15:04"},
-        {"dong": "105동 602호", "floor": "84A/84A | 14/22층 | 동향", "price": "888000000", "bundle": "3", "overall": "28", "hold": "15.7시간", "eve2": "19:33", "renew": 47, "last_up": "05/14 15:16"},
-        {"dong": "105동 608호", "floor": "113A/84A | 저/24층 | 남향", "price": "928000000", "bundle": "1", "overall": "12", "hold": "20.1시간", "eve2": "20:46", "renew": 50, "last_up": "05/14 15:09"},
-        {"dong": "106동 2201호", "floor": "84A/84A | 중/11층 | 남향", "price": "902000000", "bundle": "2", "overall": "31", "hold": "10.5시간", "eve2": "20:03", "renew": 38, "last_up": "05/14 15:22"},
-        {"dong": "106동 2205호", "floor": "84B/84B | 고/27층 | 서향", "price": "916000000", "bundle": "1", "overall": "18", "hold": "21.9시간", "eve2": "19:48", "renew": 55, "last_up": "05/14 15:01"},
-        {"dong": "107동 1108호", "floor": "59A/59A | 저/6층 | 동향", "price": "738000000", "bundle": "1", "overall": "33", "hold": "9.7시간", "eve2": "21:22", "renew": 36, "last_up": "05/14 15:18"},
-        {"dong": "107동 1110호", "floor": "113A/84A | 중/31층 | 남동향", "price": "989000000", "bundle": "2", "overall": "35", "hold": "14.3시간", "eve2": "20:25", "renew": 44, "last_up": "05/14 15:12"},
-        {"dong": "108동 3305호", "floor": "84B/84B | 5/21층 | 북향", "price": "871000000", "bundle": "4", "overall": "44", "hold": "1.3시간 (전체 44위)", "eve2": "20:12", "renew": 28, "last_up": "05/14 09:14"},
-        {"dong": "109동 902호", "floor": "59A/59A | 중/14층 | 남향", "price": "752000000", "bundle": "5", "overall": "47", "hold": "0.8시간 (전체 47위)", "eve2": "19:37", "renew": 26, "last_up": "05/14 08:52"},
-        {"dong": "109동 905호", "floor": "113B/84B | 저/19층 | 서향", "price": "941000000", "bundle": "6", "overall": "49", "hold": "1.6시간 (전체 49위)", "eve2": "21:07", "renew": 31, "last_up": "05/14 10:03"},
-        {"dong": "110동 802호", "floor": "152A/152A | 30/35층 | 남향", "price": "1288000000", "bundle": "7", "overall": "52", "hold": "1.0시간 (전체 52위)", "eve2": "20:38", "renew": 29, "last_up": "05/14 09:41"},
-        {"dong": "110동 806호", "floor": "84A/84A | 저/8층 | 동향", "price": "865000000", "bundle": "8", "overall": "46", "hold": "1.5시간 (전체 46위)", "eve2": "19:45", "renew": 27, "last_up": "05/14 09:28"},
-    ]
-
-
-def _build_unauth_demo_raw_df() -> pd.DataFrame:
-    """미인증 전용 스냅샷: 내 매물 20건(타임라인 20축) + 3501동 번들 경쟁사 4곳(감시망)."""
-    KST = timezone(timedelta(hours=9))
-    today = datetime.now(KST).date()
-    danji = "행복동 사랑단지"
-    deal = "매매"
-    cp = "네이버부동산"
-    my_agency = "사랑공인중개사사무소"
-
-    specs = _unauth_demo_listing_specs()
-    if len(specs) != 20:
-        raise RuntimeError("미인증 데모 매물 스펙은 정확히 20건이어야 합니다.")
-
-    competitors: list[tuple[str, str, str]] = [
-        ("베스트중개부동산", "6", "2"),
-        ("행복공인부동산", "7", "3"),
-        ("탑랭크중개부동산", "8", "4"),
-        ("미래스토리공인중개사", "9", "5"),
-    ]
-
-    dong0 = str(specs[0]["dong"])
-    floor0 = str(specs[0]["floor"])
-    price0 = str(specs[0]["price"])
-
-    rows: list[dict] = []
-    seq = 0
-
-    def _row(
-        ts: datetime,
-        *,
-        dong: str,
-        floor_t: str,
-        price: str,
-        overall: str,
-        bundle: str,
-        agency: str,
-        conf: str,
-        uid: str,
-        exposure: str = "단독",
-    ) -> None:
-        rows.append(
-            {
-                "수집일시": ts,
-                "단지명": danji,
-                "전체순위": overall,
-                "묶음내순위": bundle,
-                "동/호수": dong,
-                "층/타입": floor_t,
-                "거래방식": deal,
-                "가격": price,
-                "확인일자": conf,
-                "부동산명": agency,
-                "CP사": cp,
-                "고유번호": uid,
-                "노출형태": exposure,
-            }
-        )
-
-    for day_i in range(-26, 1):
-        d = today + timedelta(days=day_i)
-        conf = d.strftime("%y.%m.%d")
-        for sp in specs:
-            dong = str(sp["dong"])
-            floor_t = str(sp["floor"])
-            price = str(sp["price"])
-            bundle = str(sp["bundle"])
-            overall = str(sp["overall"])
-            for slot, (hour, minute) in enumerate(((9, 12), (15, 3))):
-                seq += 1
-                ts = datetime.combine(d, datetime.min.time()) + timedelta(
-                    hours=hour, minutes=minute + (seq % 10), seconds=seq % 50
-                )
-                alt = "M" if (day_i + slot + hash(dong)) % 2 == 0 else "N"
-                uid = f"M-{dong}-{day_i}-{slot}-{seq}-{alt}"
-                _row(ts, dong=dong, floor_t=floor_t, price=price, overall=overall, bundle=bundle, agency=my_agency, conf=conf, uid=uid)
-
-    for day_i in range(-26, 0):
-        d = today + timedelta(days=day_i)
-        conf = d.strftime("%y.%m.%d")
-        for ci, (ag, overall, bundle) in enumerate(competitors):
-            for slot, (hour, minute) in enumerate(((10, 1), (14, 40 + ci))):
-                seq += 1
-                ts = datetime.combine(d, datetime.min.time()) + timedelta(
-                    hours=hour, minutes=minute + (seq % 7), seconds=seq % 45
-                )
-                alt = "P" if (day_i + slot + ci) % 2 == 0 else "Q"
-                uid = f"C{ci}-{day_i}-{slot}-{alt}"
-                _row(
-                    ts,
-                    dong=dong0,
-                    floor_t=floor0,
-                    price=price0,
-                    overall=overall,
-                    bundle=bundle,
-                    agency=ag,
-                    conf=conf,
-                    uid=uid,
-                )
-
-    conf_t = today.strftime("%y.%m.%d")
-    # 오늘 스냅: 베스트중개(11:20)·미래스토리(14:50)만 당일 갱신 — 행복/탑랭크는 전일까지(대기·출혈 연출).
-    today_pairs = [
-        (0, (9, 5), (11, 20)),
-        (3, (14, 12), (14, 50)),
-    ]
-    for ci, hm0, hm1 in today_pairs:
-        ag, overall, bundle = competitors[ci]
-        uid0 = f"C{ci}-T0-{hm0[0]}{hm0[1]:02d}"
-        uid1 = f"C{ci}-T1-{hm1[0]}{hm1[1]:02d}"
-        _row(
-            datetime.combine(today, datetime.min.time()) + timedelta(hours=hm0[0], minutes=hm0[1]),
-            dong=dong0,
-            floor_t=floor0,
-            price=price0,
-            overall=overall,
-            bundle=bundle,
-            agency=ag,
-            conf=conf_t,
-            uid=uid0,
-        )
-        _row(
-            datetime.combine(today, datetime.min.time()) + timedelta(hours=hm1[0], minutes=hm1[1]),
-            dong=dong0,
-            floor_t=floor0,
-            price=price0,
-            overall=overall,
-            bundle=bundle,
-            agency=ag,
-            conf=conf_t,
-            uid=uid1,
-        )
-
-    return pd.DataFrame(rows)
-
-
-def _unauth_ms_top10_df() -> pd.DataFrame:
-    """미인증 화면 전용 M/S Top 10 표·차트 데이터(총점수=점유율 %)."""
-    data = [
-        ("사랑공인중개사사무소", 31, 22.4),
-        ("행복공인부동산", 24, 18.1),
-        ("단지앞365부동산", 19, 13.5),
-        ("e편한로얄공인중개사", 18, 12.8),
-        ("한강뷰스카이공인", 14, 8.2),
-        ("프라임단지중개", 12, 7.0),
-        ("드림하우스공인", 11, 5.4),
-        ("로얄OK부동산", 9, 4.5),
-        ("오늘부동산단지점", 8, 3.1),
-        ("탑랭크알파공인", 6, 2.0),
-    ]
-    return pd.DataFrame(data, columns=["부동산명", "매물건수", "총점수"])
-
-
-def _patch_unauth_demo_timeline_realistic(complex_data: dict[str, object], chart_day: datetime.date) -> None:
-    """미인증: 간트 막대가 48시간 창을 가득 채우지 않도록 매물별 Start/Finish를 짧은 구간으로 재구성."""
-    tl = complex_data.get("timeline")
-    if not isinstance(tl, pd.DataFrame) or tl.empty or "Task" not in tl.columns:
-        return
-    if "Start" not in tl.columns or "Finish" not in tl.columns:
-        return
-    day_start = pd.Timestamp(datetime.combine(chart_day - timedelta(days=1), datetime.min.time()))
-    day_end = (
-        pd.Timestamp(datetime.combine(chart_day, datetime.min.time()))
-        + pd.Timedelta(days=1)
-        - pd.Timedelta(seconds=1)
-    )
-    work = tl.copy()
-    work["Start"] = pd.to_datetime(work["Start"], errors="coerce")
-    work["Finish"] = pd.to_datetime(work["Finish"], errors="coerce")
-    vis = work[(work["Finish"] > day_start) & (work["Start"] < day_end)].copy()
-    if vis.empty:
-        return
-
-    rows_out: list[dict] = []
-    tasks_sorted = sorted(vis["Task"].dropna().unique().tolist(), key=str)
-    for ti, task in enumerate(tasks_sorted):
-        sub = vis[vis["Task"] == task]
-        state = str(sub["State"].iloc[-1]) if "State" in sub.columns and len(sub) else "🟢 1~3위 방어 중"
-        rank = sub["내순위"].iloc[-1] if "내순위" in sub.columns and len(sub) else "—"
-        top1 = sub["Top1부동산"].iloc[-1] if "Top1부동산" in sub.columns and len(sub) else "—"
-        seed = (abs(hash(str(task))) % (2**31 - 1) + int(chart_day.strftime("%Y%m%d")) + ti * 97) % (2**31 - 1)
-        rng = np.random.RandomState(seed)
-        n_seg = 1 + (ti % 3)
-        day_y = chart_day - timedelta(days=1)
-        day_t = chart_day
-        for s in range(n_seg):
-            use_y = (ti + s) % 2 == 0
-            d = day_y if use_y else day_t
-            h0 = int(rng.randint(8, 20))
-            m0 = int(rng.randint(0, 59))
-            dur_m = int(rng.randint(35, 220))
-            t0 = pd.Timestamp(datetime.combine(d, datetime.min.time())) + pd.Timedelta(hours=h0, minutes=m0)
-            t1 = t0 + pd.Timedelta(minutes=dur_m)
-            t0 = max(t0, day_start)
-            t1 = min(t1, day_end)
-            if t1 <= t0:
-                t1 = t0 + pd.Timedelta(minutes=28)
-            rows_out.append(
-                {
-                    "Task": task,
-                    "Start": t0,
-                    "Finish": t1,
-                    "State": state,
-                    "내순위": rank,
-                    "Top1부동산": top1,
-                }
-            )
-    complex_data["timeline"] = pd.DataFrame(rows_out)
-
-
-def _patch_unauth_demo_complex_data(complex_data: dict[str, object], chart_day: datetime.date) -> None:
-    """체험용: comp 패턴·경쟁사 카드 문구·매물별 광고 추천 시각을 차트 트래픽 구간과 맞춘다."""
-    dinner_band = "19:30~21:30"
-    comp = complex_data.get("comp")
-    if isinstance(comp, pd.DataFrame) and not comp.empty and "부동산명" in comp.columns:
-        comp = comp.copy()
-        # clean_realtor_name 기준 키 — 감시 카드 패턴·빈도
-        by_clean: dict[str, dict[str, object]] = {
-            "베스트중개": {
-                "주력 갱신 시간": "10~12시",
-                "오늘 요일 주력 시간": "10~12시",
-                "오늘 요일 마지노선": 11,
-                "오늘_요일_그룹": "화~목",
-                "오늘요일_실측": True,
-                "갱신빈도": "🔥 매일 갱신",
-            },
-            "행복공인": {
-                "주력 갱신 시간": "15~17시",
-                "오늘 요일 주력 시간": "15~17시",
-                "오늘 요일 마지노선": 16,
-                "오늘_요일_그룹": "화~목",
-                "오늘요일_실측": True,
-                "갱신빈도": "👑 상위권 패턴",
-            },
-            "탑랭크중개": {
-                "주력 갱신 시간": "09시 전후",
-                "오늘 요일 주력 시간": "09시 전후",
-                "오늘 요일 마지노선": 10,
-                "오늘_요일_그룹": "화~목",
-                "오늘요일_실측": True,
-                "갱신빈도": "⚡ 게릴라 갱신",
-            },
-            "미래스토리": {
-                "주력 갱신 시간": "13~15시",
-                "오늘 요일 주력 시간": "13~15시",
-                "오늘 요일 마지노선": 15,
-                "오늘_요일_그룹": "화~목",
-                "오늘요일_실측": True,
-                "갱신빈도": "🔥 매일 갱신",
-            },
-        }
-        for i in comp.index:
-            raw_nm = str(comp.at[i, "부동산명"]).strip()
-            ck = clean_realtor_name(raw_nm)
-            if ck not in by_clean:
-                continue
-            for col, val in by_clean[ck].items():
-                if col not in comp.columns:
-                    comp[col] = pd.NA
-                comp.at[i, col] = val
-        complex_data["comp"] = comp
-
-    act = complex_data.get("action")
-    if isinstance(act, pd.DataFrame) and not act.empty and "Task" in act.columns:
-        act = act.copy().reset_index(drop=True)
-        danji = "행복동 사랑단지"
-        specs = _unauth_demo_listing_specs()
-        task_meta: dict[str, dict[str, str | int]] = {}
-        for idx, sp in enumerate(specs):
-            tk = _task_label_from_spec(danji, str(sp["dong"]), str(sp["floor"]), sp["price"])
-            eve_hm = str(sp["eve2"])
-
-            # [수정] 1순위 추천 시각을 매물마다 완전히 다르게 분산 (빨간 별표 일직선 해결)
-            rng = np.random.RandomState(idx + 42)
-            h = int(rng.randint(10, 16))
-            m = int(rng.randint(0, 59))
-
-            advice = (
-                f"💡 1순위: {h:02d}:{m:02d} (AI 최적 타점) / "
-                f"💡 2순위: {eve_hm} (저녁 피크 · {dinner_band})"
-            )
-            task_meta[tk] = {
-                "advice": advice,
-                "hold": str(sp["hold"]),
-                "renew": int(sp["renew"]),
-                "last_up": str(sp["last_up"]),
-            }
-
-        strat: dict[str, str] = {}
-        for i in range(len(act)):
-            tk = str(act.at[i, "Task"]).strip()
-            meta = task_meta.get(tk)
-            if meta is None:
-                continue
-            act.at[i, "광고 추천 시간"] = meta["advice"]
-            act.at[i, "상위권 유지 기간"] = meta["hold"]
-            act.at[i, "광고 갱신 횟수"] = meta["renew"]
-            act.at[i, "최근 갱신 시각"] = meta["last_up"]
-            strat[tk] = str(meta["advice"])
-        complex_data["action"] = act
-        complex_data["strategy_dict"] = strat
-
-    _patch_unauth_demo_timeline_realistic(complex_data, chart_day)
-
-
-def _unauth_demo_watch_card_rows() -> list[dict[str, str | bool]]:
-    """미인증 감시망 카드 4건 — `target_status` 엔트리를 동일 렌더러로 덮어쓸 때 사용."""
-    _g = "color:#64748b;font-size:0.9rem;"
-    _s = "color:#94a3b8;font-size:0.8rem;"
-    return [
-        {
-            "clean_key": "베스트중개",
-            "display_short": "베스트중개",
-            "freq": "",
-            "icon": "🔥",
-            "type": "고빈도 추격조",
-            "html": (
-                "<b>🟢 오늘 광고 완료 (09:15 진행)</b><br>"
-                f"<span style='{_g}'>평소: 09~11시 집중</span><br>"
-                f"<span style='{_s}'>마지노선: 12:00</span>"
-            ),
-            "is_waiting": False,
-            "is_done_today": True,
-            "last_active_time": "09:15",
-        },
-        {
-            "clean_key": "행복공인",
-            "display_short": "행복공인",
-            "freq": "",
-            "icon": "👑",
-            "type": "상위권 방어조",
-            "html": (
-                "<b>🔴 아직 활동 전 (주의)</b><br>"
-                f"<span style='{_g}'>평소: 15~17시 집중</span><br>"
-                f"<span style='{_s}'>마지노선: 16:30 (이후 안전)</span>"
-            ),
-            "is_waiting": True,
-            "is_done_today": False,
-            "last_active_time": "어제 16:10",
-        },
-        {
-            "clean_key": "탑랭크중개",
-            "display_short": "탑랭크중개",
-            "freq": "",
-            "icon": "⚡",
-            "type": "게릴라 갱신조",
-            "html": (
-                "<b>🔵 활동 없음 (마지노선 경과)</b><br>"
-                f"<span style='{_g}'>평소: 오전 10시 몰빵형</span><br>"
-                f"<span style='{_s}'>마지노선 11시 경과</span>"
-            ),
-            "is_waiting": False,
-            "is_done_today": False,
-            "last_active_time": "어제 10:15",
-        },
-        {
-            "clean_key": "미래스토리",
-            "display_short": "미래부동산",
-            "freq": "",
-            "icon": "🔥",
-            "type": "고빈도 추격조",
-            "html": (
-                "<b>🟢 오늘 광고 완료 (14:50 진행)</b><br>"
-                f"<span style='{_g}'>평소: 13~15시 집중</span><br>"
-                f"<span style='{_s}'>마지노선: 15:30</span>"
-            ),
-            "is_waiting": False,
-            "is_done_today": True,
-            "last_active_time": "14:50",
-        },
-    ]
-
-
-def _apply_unauth_demo_watch_target_overrides(target_status: dict) -> None:
-    """미인증: 감시 경쟁사 카드 표시용 필드를 데모 시나리오로 덮어쓴다(렌더 함수는 그대로)."""
-    for row in _unauth_demo_watch_card_rows():
-        ck = str(row["clean_key"])
-        if ck not in target_status:
-            continue
-        info = target_status[ck]
-        info["display_short"] = html.escape(str(row["display_short"]))
-        info["freq"] = str(row["freq"])
-        info["icon"] = str(row["icon"])
-        info["type"] = str(row["type"])
-        info["html"] = str(row["html"])
-        info["is_waiting"] = bool(row["is_waiting"])
-        info["is_done_today"] = bool(row["is_done_today"])
-        info["last_active_time"] = str(row["last_active_time"])
-
-
 def main() -> None:
     _logo_path = os.path.join(_APP_DIR, "LOGO.png")
     st.set_page_config(
@@ -2546,7 +2128,7 @@ def main() -> None:
         font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, sans-serif !important;
     }
     .stApp { background-color: #F8FAFC; }
-    header, #MainMenu, footer {visibility: hidden;}
+    header, footer {visibility: hidden;}
     .block-container {
         padding-top: 2rem !important;
         padding-bottom: 2.5rem !important;
@@ -2569,89 +2151,112 @@ def main() -> None:
     )
     st.markdown("<br>", unsafe_allow_html=True)
 
-    user_id = st.query_params.get("id")
-    IS_UNAUTH_DEMO = not user_id
-    if IS_UNAUTH_DEMO:
-        st.info("💡 체험단 문의는 010-8416-2806 으로 연락주시면 친절히 안내해드리겠습니다.")
+    # [초고속 데모 전용 캐시 함수 - 하드디스크 영구 박제]
+    @st.cache_data(show_spinner=False, persist="disk")
+    def load_fast_demo_state_v2():
+        demo_path = os.path.join(BASE_DIR, "demo_market_report.parquet")
+        if not os.path.exists(demo_path):
+            return None
+        r_df = pd.read_parquet(demo_path)
+        d = process_data(r_df)
+        if "CP사" in d.columns:
+            d = d[~d["CP사"].fillna("").astype(str).str.contains("한국공인중개사협회", na=False)].copy()
+        d = _prepare_listing_identity(d)
+        d["수집일시"] = pd.to_datetime(d["수집일시"], errors="coerce")
+        t_kst = d["수집일시"].max().date()
+        s_dt = pd.to_datetime(t_kst - timedelta(days=2))
+        e_dt = pd.to_datetime(t_kst) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+        f_df = d.loc[(d["수집일시"] >= s_dt) & (d["수집일시"] <= e_dt)]
+        c_list = sorted(f_df["단지명"].dropna().unique().tolist())
+        m_dict = _precompute_all_complexes_data_impl(f_df, c_list, "사랑공인중개사사무소", t_kst)
+        return f_df, c_list, m_dict, t_kst, s_dt.date()
 
-    if IS_UNAUTH_DEMO:
+    try:
+        host_url = st.context.headers.get("host", "")
+    except Exception:
+        host_url = ""
+
+    user_id = st.query_params.get("id")
+
+    # [핵심] id가 없거나 'demo'이거나 메인 도메인이면 모두 데모 모드
+    IS_DEMO_DOMAIN = "toprank-ai.com" in host_url or not user_id or user_id == "demo"
+
+    if IS_DEMO_DOMAIN:
         filter_realtor_name = "사랑공인중개사사무소"
         display_realtor = filter_realtor_name
-        demo_name = filter_realtor_name
-        IS_DEMO_MODE = False
-        target_complexes = ["행복동 사랑단지"]
-        raw_df = _build_unauth_demo_raw_df()
+        IS_DEMO_MODE = True
+
+        demo_state = load_fast_demo_state_v2()
+        if demo_state is None:
+            st.error("⚠️ 데모 데이터가 없습니다. 터미널에서 `python make_demo.py`를 실행하세요.")
+            st.stop()
+
+        filtered_df, _complex_choices, master_data_dict, today_kst, default_start_date = demo_state
+
+        st.sidebar.header("분석 기간")
+        # 데모 모드에서는 캘린더를 비활성화(disabled)하여 불필요한 연산 낭비 차단
+        s_d = st.sidebar.date_input("시작일", default_start_date, key="tl_sd", disabled=True)
+        e_d = st.sidebar.date_input("종료일", today_kst, key="tl_ed", disabled=True)
+        start_dt = pd.to_datetime(s_d)
+        end_dt = pd.to_datetime(e_d) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+
     else:
+        # 기존 일반(유료/체험단) 실시간 접속 로직
         REALTOR_MAP = load_realtor_map()
         if user_id not in REALTOR_MAP:
-            user_id = "demo"
-        IS_DEMO_MODE = user_id == "demo"
-        current_realtor = REALTOR_MAP.get(user_id)
+            user_id = "default"
+        IS_DEMO_MODE = False
+        current_realtor = REALTOR_MAP.get(user_id, {})
         if isinstance(current_realtor, dict):
-            filter_realtor_name = current_realtor.get("name", "체험용 부동산")
+            filter_realtor_name = current_realtor.get("name", "테스트 부동산")
             target_complexes = current_realtor.get("complexes", [])
         else:
             filter_realtor_name = str(current_realtor)
             target_complexes = []
 
-        raw_demo = REALTOR_MAP.get("demo", {"name": "체험용 부동산"})
-        demo_name = raw_demo.get("name", "체험용 부동산") if isinstance(raw_demo, dict) else str(raw_demo)
-        display_realtor = demo_name if IS_DEMO_MODE else filter_realtor_name
-
+        display_realtor = filter_realtor_name
         raw_df = load_server_data()
-        if raw_df is not None and target_complexes:
+        if raw_df is None:
+            st.error(f"데이터 파일을 찾지 못했습니다. 경로: `{DATA_DIR}`")
+            st.stop()
+        if target_complexes:
             raw_df = raw_df[raw_df["단지명"].isin(target_complexes)].copy()
 
-    if raw_df is None:
-        st.error(f"데이터 파일을 찾지 못했습니다. 경로: `{DATA_DIR}`")
-        st.stop()
-
-    df = process_data(raw_df)
-    if "CP사" in df.columns:
-        df = df[
-            ~df["CP사"].fillna("").astype(str).str.contains("한국공인중개사협회", na=False)
-        ].copy()
-    df = _prepare_listing_identity(df)
-    if "수집일시" in df.columns:
+        df = process_data(raw_df)
+        if "CP사" in df.columns:
+            df = df[~df["CP사"].fillna("").astype(str).str.contains("한국공인중개사협회", na=False)].copy()
+        df = _prepare_listing_identity(df)
         df["수집일시"] = pd.to_datetime(df["수집일시"], errors="coerce")
 
-    min_time, max_time = df["수집일시"].min(), df["수집일시"].max()
-    if df.empty or pd.isna(min_time) or pd.isna(max_time):
-        st.error("일간 마감 컷오프 이후 분석 가능한 데이터가 없습니다.")
-        st.stop()
+        min_time, max_time = df["수집일시"].min(), df["수집일시"].max()
+        st.sidebar.header("분석 기간")
+        KST = timezone(timedelta(hours=9))
+        today_kst = datetime.now(KST).date()
+        if pd.isna(min_time) or pd.isna(max_time):
+            default_start_date = today_kst - timedelta(days=2)
+        else:
+            default_start_date = max(min_time.date(), today_kst - timedelta(days=14))
 
-    st.sidebar.header("분석 기간")
-    KST = timezone(timedelta(hours=9))
-    today_kst = datetime.now(KST).date()
-    default_start_date = max(min_time.date(), max_time.date() - timedelta(days=14))
-    s_d = st.sidebar.date_input("시작일", default_start_date, key="tl_sd")
-    e_d = st.sidebar.date_input("종료일", today_kst, key="tl_ed")
+        s_d = st.sidebar.date_input("시작일", default_start_date, key="tl_sd")
+        e_d = st.sidebar.date_input("종료일", today_kst, key="tl_ed")
 
-    start_dt = pd.to_datetime(s_d)
-    end_dt = pd.to_datetime(e_d) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
-    # [최적화] 전체 52만 건을 매번 검색하지 않도록 날짜 마스크로 먼저 줄임
-    mask = (df["수집일시"] >= start_dt) & (df["수집일시"] <= end_dt)
-    if target_complexes:
-        mask = mask & df["단지명"].isin(target_complexes)
+        start_dt = pd.to_datetime(s_d)
+        end_dt = pd.to_datetime(e_d) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+        mask = (df["수집일시"] >= start_dt) & (df["수집일시"] <= end_dt)
+        if target_complexes:
+            mask = mask & df["단지명"].isin(target_complexes)
 
-    filtered_df = df.loc[mask]
-    if filtered_df.empty:
-        st.error("선택한 기간에 데이터가 없습니다.")
-        st.stop()
+        filtered_df = df.loc[mask]
+        if filtered_df.empty:
+            st.error("선택한 기간에 데이터가 없습니다.")
+            st.stop()
 
-    _complex_choices = sorted(filtered_df["단지명"].dropna().unique().tolist())
-    if not _complex_choices:
-        st.error("선택한 기간에 단지명이 있는 데이터가 없습니다.")
-        st.stop()
+        _complex_choices = sorted(filtered_df["단지명"].dropna().unique().tolist())
+        if not _complex_choices:
+            st.error("선택한 기간에 단지명이 있는 데이터가 없습니다.")
+            st.stop()
 
-    if IS_UNAUTH_DEMO:
-        master_data_dict = _precompute_all_complexes_data_impl(
-            filtered_df, _complex_choices, filter_realtor_name, e_d
-        )
-    else:
-        master_data_dict = precompute_all_complexes_data(
-            filtered_df, _complex_choices, filter_realtor_name, e_d
-        )
+        master_data_dict = precompute_all_complexes_data(filtered_df, _complex_choices, filter_realtor_name, e_d)
 
     _sel_complex = st.sidebar.selectbox(
         "단지명",
@@ -2671,17 +2276,12 @@ def main() -> None:
         st.error("해당 단지의 계산된 데이터가 없습니다.")
         st.stop()
 
-    if IS_UNAUTH_DEMO:
-        _patch_unauth_demo_complex_data(complex_data, e_d)
-
     action_df = complex_data["action"]
     if "tl_task_sort" not in st.session_state:
         st.session_state.tl_task_sort = _TASK_SORT_OPTIONS[0]
     timeline_df = complex_data["timeline"]
     ms_df = complex_data.get("ms", pd.DataFrame())
     comp_df = complex_data.get("comp", pd.DataFrame())
-    if IS_UNAUTH_DEMO:
-        ms_df = _unauth_ms_top10_df()
 
     # B2B SaaS 레이아웃: KPI 4열 + Tabs (트렌드 / 타임라인 / M·S)
     if True:
@@ -2700,8 +2300,6 @@ def main() -> None:
             st.markdown(_CUSTOMER_WHITEPAPER_MD)
 
         eff_total = _timeline_efficiency_score_from_tl_plot(tl_plot)
-        if IS_UNAUTH_DEMO:
-            eff_total = 63.0
         eff_day_prev = e_d - timedelta(days=1)
         eff_color = "#10B981" if eff_total >= 80 else ("#F59E0B" if eff_total >= 50 else "#EF4444")
 
@@ -2736,12 +2334,13 @@ def main() -> None:
             unsafe_allow_html=True,
         )
 
-        tab_command, tab_timeline, tab_trend, tab_ms = st.tabs(
+        tab_command, tab_timeline, tab_trend, tab_ms, tab_conclusion = st.tabs(
             [
                 "📡 광고 전술판",
                 "📊 점유율 타임라인",
                 "📈 일간 점수 트렌드",
                 "🏆 단지 내 시장 점유율 (M/S)",
+                "💡 가설 검증 결과 및 서비스 도입",
             ]
         )
 
@@ -2756,11 +2355,6 @@ def main() -> None:
             else:
                 kst_now_cmd = _now_kst_naive()
                 kst_today_cmd = kst_now_cmd.date()
-                if IS_UNAUTH_DEMO:
-                    kst_now_cmd = pd.Timestamp.combine(kst_today_cmd, datetime.min.time()) + timedelta(
-                        hours=10, minutes=19
-                    )
-                    kst_today_cmd = kst_now_cmd.date()
 
                 t_df_cmd = filtered_df[filtered_df["단지명"] == _sel_complex].copy()
                 if not t_df_cmd.empty and "Task" not in t_df_cmd.columns:
@@ -2806,7 +2400,6 @@ def main() -> None:
                             kst_today=kst_today_cmd,
                             my_unified=my_unified_cmd,
                             is_demo_mode=IS_DEMO_MODE,
-                            is_unauth_demo=IS_UNAUTH_DEMO,
                             filter_realtor_name=filter_realtor_name,
                             display_realtor=display_realtor,
                         )
@@ -2854,22 +2447,15 @@ def main() -> None:
             spark_start = max(e_d - timedelta(days=13), start_dt.date())
             dates = pd.date_range(start=spark_start, end=end_dt.date())
 
-            if IS_UNAUTH_DEMO:
-                _t0 = max(e_d - timedelta(days=13), start_dt.date())
-                spark_days = [_t0 + timedelta(days=i) for i in range(14)]
-                # [수정] 밋밋하지 않게 극적인 우상향 그래프로 데이터 변경
-                _scores_14 = [38, 42, 35, 52, 48, 65, 55, 72, 68, 85, 78, 92, 88, 95]
-                df_trend = pd.DataFrame({"날짜": spark_days, "점수": _scores_14})
-            else:
-                trend_data = []
-                for d in dates:
-                    d_date = d.date()
-                    t_tl, _, _ = _clip_timeline_to_chart_day(timeline_df, d_date)
-                    sc = _timeline_efficiency_score_from_tl_plot(t_tl)
-                    trend_data.append({"날짜": d_date, "점수": sc})
-                df_trend = pd.DataFrame(trend_data)
-                if df_trend.empty:
-                    df_trend = pd.DataFrame([{"날짜": e_d, "점수": float(eff_total)}])
+            trend_data = []
+            for d in dates:
+                d_date = d.date()
+                t_tl, _, _ = _clip_timeline_to_chart_day(timeline_df, d_date)
+                sc = _timeline_efficiency_score_from_tl_plot(t_tl)
+                trend_data.append({"날짜": d_date, "점수": sc})
+            df_trend = pd.DataFrame(trend_data)
+            if df_trend.empty:
+                df_trend = pd.DataFrame([{"날짜": e_d, "점수": float(eff_total)}])
 
             # 차트 렌더링
             fig_spark = px.line(df_trend, x="날짜", y="점수", markers=True)
@@ -3108,8 +2694,6 @@ def main() -> None:
                             y1=1,
                         )
                         _peak_lbl = "트래픽 집중"
-                        if IS_UNAUTH_DEMO:
-                            _peak_lbl = "점심·11:30~13:30" if _slot_i == 0 else "저녁·19:30~21:30"
                         fig.add_annotation(
                             x=_pk0 + (_pk1 - _pk0) / 2,
                             xref="x",
@@ -3237,6 +2821,136 @@ def main() -> None:
                     st.plotly_chart(fig_ms, use_container_width=True, config={"displayModeBar": False})
             else:
                 st.info("점유율 데이터가 없습니다.")
+
+        with tab_conclusion:
+            st.markdown("### 🔬 5월 실제 데이터 기반 마켓 리서치 보고서")
+            st.markdown("수천 건의 네이버 부동산 실시간 수집 데이터를 정밀 분석하여 통계학적으로 입증된 **최상위 노출의 핵심 법칙**입니다.")
+            st.write("")
+
+            # 1. 데이터 정의 및 차트 먼저 생성 (정렬용)
+            df_h1_plot = pd.DataFrame({
+                "단지 규모": ["소규모 단지", "중규모 단지", "대규모 단지"],
+                "상위권 도달률(%)": [80.3, 79.2, 76.0]
+            })
+            fig_h1 = px.bar(
+                df_h1_plot, 
+                x="단지 규모", 
+                y="상위권 도달률(%)", 
+                text="상위권 도달률(%)",
+                color_discrete_sequence=["#3B82F6"]
+            )
+            fig_h1.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
+            fig_h1.update_layout(
+                height=260, 
+                margin=dict(t=20, b=10, l=10, r=10),
+                yaxis_range=[0, 100],
+                plot_bgcolor="rgba(0,0,0,0)",
+                xaxis_title="",
+                yaxis_title="도달률 (%)",
+            )
+
+            df_h2_plot = pd.DataFrame({
+                "단지 규모": ["소규모 단지", "소규모 단지", "중규모 단지", "중규모 단지", "대규모 단지", "대규모 단지"],
+                "갱신 타이밍": ["일반 경쟁 시간대", "탑랭크 AI 추천 타이밍"] * 3,
+                "순위 방어율(%)": [17.8, 60.4, 49.2, 73.1, 43.8, 63.9]
+            })
+            fig_h2 = px.bar(
+                df_h2_plot, 
+                x="단지 규모", 
+                y="순위 방어율(%)", 
+                color="갱신 타이밍", 
+                barmode="group",
+                text="순위 방어율(%)",
+                color_discrete_sequence=["#94A3B8", "#10B981"]
+            )
+            fig_h2.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
+            fig_h2.update_layout(
+                height=260, 
+                margin=dict(t=20, b=10, l=10, r=10),
+                yaxis_range=[0, 100],
+                plot_bgcolor="rgba(0,0,0,0)",
+                xaxis_title="",
+                yaxis_title="방어율 (%)",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            )
+
+            # 2. [상단 레이어] 가설 1, 2 텍스트 배치
+            col_txt1, col_txt2 = st.columns(2)
+            
+            with col_txt1:
+                st.markdown("#### 1️⃣ 가설 1. 광고 갱신과 상위 노출의 인과관계")
+                st.markdown(
+                    "**“광고 갱신은 상위권(1~3위)에 진입하기 위한 가장 확실한 열쇠입니다.”**<br><br>"
+                    "실제 분석 결과, 단지 규모에 관계없이 광고 갱신 시 **75.9% ~ 80.3%**라는 압도적인 도달률로 상위권 노출에 성공했습니다.<br>"
+                    "다만 대단지일수록 네이버 반영 지연 시간이 길어지므로 전략적 타이밍 갱신이 결합되어야 효율을 극대화할 수 있습니다.",
+                    unsafe_allow_html=True
+                )
+
+            with col_txt2:
+                st.markdown("#### 2️⃣ 가설 2. 최적의 갱신 타이밍 (Last Mover 효과)")
+                st.markdown(
+                    "**“가장 마지막에 광고한 집단이 경쟁이 치열한 시간대 대비 방어율이 최대 43%p 높았습니다.”**<br><br>"
+                    "타 중개업소들이 우후죽순 광고를 몰아치는 혼잡 시간대(일반 경쟁 시간대)의 순위 방어율은 **17.8%~49.2%**에 불과했습니다.<br>"
+                    "반면, 경쟁사들의 세팅이 모두 끝난 직후 빈집을 노린 집단(**탑랭크 AI 추천 타이밍**)은 방어율이 **60.4%~73.1%**로 치솟으며 오랜 시간 상위권을 안정적으로 독점했습니다.",
+                    unsafe_allow_html=True
+                )
+
+            st.write("") # 간격 조정
+
+            # 3. [중단 레이어] 차트 전용 행 구성 (칼정렬)
+            col_graph1, col_graph2 = st.columns(2)
+            with col_graph1:
+                st.plotly_chart(fig_h1, use_container_width=True, config={"displayModeBar": False})
+            with col_graph2:
+                st.plotly_chart(fig_h2, use_container_width=True, config={"displayModeBar": False})
+
+            st.write("")
+            st.divider()
+
+            # 4. [하단 레이어] 프리미엄 요금 카드 — Markdown 들여쓰기 코드블록 깨짐 방지 위해 iframe HTML 사용
+            _premium_card_html = """
+<style>
+body { margin: 0; font-family: sans-serif; }
+</style>
+<div style="
+  background-color: #ffffff;
+  padding: 30px;
+  border-radius: 12px;
+  border: 2px solid #2563eb;
+  box-shadow: 0 4px 20px rgba(37, 99, 235, 0.15);
+  text-align: center;
+  margin: 8px auto 0 auto;
+  max-width: 800px;
+">
+  <span style="
+    background-color: #eff6ff;
+    color: #1e40af;
+    font-size: 0.8rem;
+    font-weight: 700;
+    padding: 5px 16px;
+    border-radius: 50px;
+    border: 1px solid #bfdbfe;
+    display: inline-block;
+  ">PREMIUM SERVICE</span>
+  <h2 style="margin: 15px 0 10px 0; color: #1e293b; font-size: 1.5rem; font-weight: 700;">🚀 탑랭크 AI 프리미엄 서비스 도입 비용</h2>
+  <h1 style="color: #2563eb; font-size: 3rem; margin: 10px 0; font-weight: 800;">월 90,000원</h1>
+  <p style="color: #475569; font-size: 1rem; line-height: 1.7; margin-bottom: 25px; font-weight: 500;">
+    하루 커피 한 잔 값으로 우리 단지 내 <b>최상위 노출 점유율을 독점</b>하고,<br>
+    소모적인 상단 갱신 경쟁과 불필요한 광고 스트레스에서 영원히 해방되세요!
+  </p>
+  <div style="
+    background-color: #f8fafc;
+    padding: 12px 24px;
+    border-radius: 8px;
+    border: 1px dashed #cbd5e1;
+    display: inline-block;
+  ">
+    <span style="color: #64748b; font-size: 0.85rem; display: block; margin-bottom: 4px; font-weight: 600;">💳 이용대금 납부 계좌</span>
+    <strong style="color: #0f172a; font-size: 1.15rem; letter-spacing: 0.5px;">기업은행 174-117603-01-012 <span style="color: #2563eb; font-weight: 700;">신성우</span></strong>
+  </div>
+</div>
+"""
+            components.html(_premium_card_html.strip(), height=430, scrolling=False)
 
 if __name__ == "__main__":
     main()
