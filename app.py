@@ -12,6 +12,7 @@ import os
 import time
 
 import re
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 
 import datetime as _std_datetime_module  # log_user_action용 표준 datetime 모듈
@@ -1826,7 +1827,7 @@ def _precompute_all_complexes_data_impl(
     df_to_process: pd.DataFrame,
     complexes_list: list[str],
     realtor_name: str,
-    target_date: datetime.date,
+    target_date: datetime.date | datetime.datetime | pd.Timestamp,
 ) -> dict[str, dict[str, pd.DataFrame]]:
     """단지별 사전 계산 본체 (캐시 없음). 미인증 데모는 이 경로만 호출해 대용량 캐시 키·스피너를 피한다."""
     import time  # 상단에 임포트했지만 혹시 몰라 안전하게 내부에서도 확인
@@ -1983,7 +1984,7 @@ def _precompute_all_complexes_data_impl(
 
             # [추가] 주력 갱신 시간, 요일 그룹별 주력·마지노선, 예측 신뢰도
             # target_date: 달력 종료일(e_d)과 동기 — 실시간 서버 시각이 아님
-            _pat_wd = target_date.weekday()
+            _pat_wd = pd.Timestamp(target_date).weekday()
 
             def _today_weekday_group_kr() -> str:
                 if _pat_wd == 0:
@@ -2121,7 +2122,7 @@ def precompute_all_complexes_data(
     df_to_process: pd.DataFrame,
     complexes_list: list[str],
     realtor_name: str,
-    target_date: datetime.date,
+    target_date: datetime.date | datetime.datetime | pd.Timestamp,
 ) -> dict[str, dict[str, pd.DataFrame]]:
     """기간·부동산 필터가 같을 때 단지 전환 시 재계산 없이 쓰기 위한 일괄 사전 계산 (캐시 적용)."""
     return _precompute_all_complexes_data_impl(
@@ -2129,59 +2130,69 @@ def precompute_all_complexes_data(
     )
 
 
-@st.cache_data(show_spinner=False)
-def load_fast_demo_state_v4(real_realtor_name: str):
-    raw = load_server_data()
-    if raw is None or raw.empty:
+@st.cache_data(show_spinner=False, persist="disk")
+def load_fast_demo_state_v4(real_realtor_name):
+    d = load_server_data()
+    if d is None or d.empty:
         return None
 
-    # 1. 타겟 부동산 행만 (원본 부동산명 기준 substring)
-    d = raw.loc[
-        raw["부동산명"].fillna("").astype(str).str.contains(real_realtor_name, na=False)
-    ].copy()
-    if d.empty:
+    # 1. b456 부동산이 속한 실제 단지명 추출 후 해당 단지의 전체 데이터 가져오기
+    my_rows = d[d["부동산명"].fillna("").astype(str).str.contains("다산자이골드", na=False)]
+    if my_rows.empty:
+        my_rows = d[
+            d["부동산명"].fillna("").astype(str).str.contains(real_realtor_name, na=False)
+        ]
+
+    if not my_rows.empty:
+        target_complexes = my_rows["단지명"].dropna().unique()
+        f_df = d[d["단지명"].isin(target_complexes)].copy()
+    else:
         return None
 
-    d = process_data(d)
-    if "CP사" in d.columns:
-        d = d[~d["CP사"].fillna("").astype(str).str.contains("한국공인중개사협회", na=False)].copy()
-    d = _prepare_listing_identity(d)
-    d["수집일시"] = pd.to_datetime(d["수집일시"], errors="coerce")
-
-    # 2. 날짜 고정 (5/4 ~ 5/18)
-    s_dt = pd.to_datetime("2026-05-04 00:00:00")
-    e_dt = pd.to_datetime("2026-05-18 23:59:59")
-    f_df = d.loc[(d["수집일시"] >= s_dt) & (d["수집일시"] <= e_dt)].copy()
+    # 2. 지정된 날짜 기간 엄격 하드코딩 고정 (2026-05-01 ~ 2026-05-15)
+    f_df["수집일시"] = pd.to_datetime(f_df["수집일시"], errors="coerce")
+    s_dt = pd.to_datetime("2026-05-01 00:00:00")
+    e_dt = pd.to_datetime("2026-05-15 23:59:59")
+    f_df = f_df.loc[(f_df["수집일시"] >= s_dt) & (f_df["수집일시"] <= e_dt)].copy()
     if f_df.empty:
         return None
 
-    # 3. 익명화 (단지·동호·타 중개사명)
-    f_df["단지명"] = "사랑동행복단지"
-    f_df["동/호수"] = "비공개동/호수"
-
+    # 3. 데이터 조작 없이 원본 순위 유지 개인정보만 매핑
     unique_realtors = f_df["부동산명"].dropna().unique()
-    rename_map: dict[str, str] = {}
+    rename_map = {}
     comp_idx = 1
+
     for r in unique_realtors:
-        rs = str(r).strip()
-        if real_realtor_name in rs:
-            rename_map[rs] = "사랑공인중개사사무소"
+        rs = str(r)
+        if "다산자이골드" in rs or real_realtor_name in rs:
+            rename_map[r] = "사랑공인중개사사무소"
         else:
-            rename_map[rs] = f"경쟁사 {chr(64 + comp_idx)}부동산"
+            rename_map[r] = f"경쟁사 {chr(64 + comp_idx)}부동산"
             comp_idx += 1
             if comp_idx > 26:
                 comp_idx = 1
 
-    f_df["부동산명"] = f_df["부동산명"].astype(str).map(rename_map).fillna(f_df["부동산명"])
+    f_df["부동산명"] = f_df["부동산명"].map(rename_map).fillna(f_df["부동산명"])
+    f_df["단지명"] = "사랑동행복단지"
+    f_df["동/호수"] = "비공개동/호수"
 
-    # 단지명·동/호 변경 반영 위해 식별 키 재구축
+    # 4. 후처리 파이프라인 동기화 (동/호·부동산명 반영 키 재구성; 순위·점수 산정 없음)
+    f_df = process_data(f_df)
+    if "CP사" in f_df.columns:
+        f_df = f_df[~f_df["CP사"].fillna("").astype(str).str.contains("한국공인중개사협회", na=False)].copy()
     f_df = _prepare_listing_identity(f_df)
 
     c_list = ["사랑동행복단지"]
+
+    max_dt = f_df["수집일시"].max()
+    if pd.isna(max_dt):
+        return None
+
     m_dict = _precompute_all_complexes_data_impl(
-        f_df, c_list, "사랑공인중개사사무소", e_dt.date()
+        f_df, c_list, "사랑공인중개사사무소", pd.Timestamp(max_dt)
     )
-    return f_df, c_list, m_dict, e_dt.date(), s_dt.date()
+
+    return f_df, c_list, m_dict, pd.Timestamp(max_dt), s_dt.date()
 
 
 def main() -> None:
@@ -2234,26 +2245,44 @@ def main() -> None:
 
     user_id = st.query_params.get("id")
 
-    # [핵심] id가 없거나 'demo'이거나 메인 도메인이면 모두 데모 모드
+    # [핵심] id가 없거나 'demo'이거나 메인 도메인이면 데모 모드 후보
     IS_DEMO_DOMAIN = "toprank-ai.com" in host_url or not user_id or user_id == "demo"
 
+    # URL 파라미터 방어 (체험단 id 등이 있으면 실제 유료 대시보드 진입)
+    qp_id = st.query_params.get("id")
+    qp_nonempty = ""
+    if qp_id is not None:
+        if isinstance(qp_id, str):
+            qp_nonempty = qp_id.strip()
+        else:
+            try:
+                qp_nonempty = str(next(iter(qp_id))).strip()
+            except (TypeError, StopIteration):
+                qp_nonempty = ""
+
+    if qp_nonempty:
+        IS_DEMO_DOMAIN = False
+        IS_DEMO_MODE = False
+
     if IS_DEMO_DOMAIN:
-        # realtors.json id `b456` → 실명 (데모에서는 익명화 파이프라인으로만 사용)
-        real_target_realtor = "다산자이골드"
+        real_target_realtor = "다산자이골드부동산공인중개사사무소"
 
         filter_realtor_name = "사랑공인중개사사무소"
         display_realtor = filter_realtor_name
         IS_DEMO_MODE = True
 
         demo_state = load_fast_demo_state_v4(real_target_realtor)
+
         if demo_state is None:
-            st.error(
-                "⚠️ 데모 데이터를 만들 수 없습니다. 서버 크롤 데이터에 해당 부동산(기간 내) 행이 없거나 "
-                "`load_server_data()`가 비었습니다."
-            )
+            st.warning("⚠️ 데모 데이터를 로드할 수 없습니다. 서버 크롤 데이터를 확인해 주세요.")
             st.stop()
 
-        filtered_df, _complex_choices, master_data_dict, today_kst, default_start_date = demo_state
+        f_df, c_list, m_dict, demo_anchor_ts, s_dt_default = demo_state
+        filtered_df = f_df
+        _complex_choices = c_list
+        master_data_dict = m_dict
+        today_kst = pd.Timestamp(demo_anchor_ts).date()
+        default_start_date = s_dt_default
 
         st.sidebar.header("분석 기간")
         # 데모 모드에서는 캘린더를 비활성화(disabled)하여 불필요한 연산 낭비 차단
@@ -2354,8 +2383,25 @@ def main() -> None:
             active_tasks = tl_plot["Task"].dropna().unique()
             action_df_48h = action_df[action_df["Task"].isin(active_tasks)].copy()
 
+        title_esc = html.escape(str(display_realtor))
+        if IS_DEMO_MODE:
+            heading = (
+                f'<span style="font-size: 2.2rem; font-weight: 800; color: #0F172A;">'
+                f'🏢 {title_esc} 전용 리포트 '
+                f"<span style='font-size:0.5em; color:#888; font-weight:normal; vertical-align:middle;'>"
+                f"(가상의 데이터로 만들어진 데모 버전입니다)</span></span>"
+            )
+        else:
+            heading = (
+                f'<span style="font-size: 2.2rem; font-weight: 800; color: #0F172A;">'
+                f"🏢 {title_esc} 전용 리포트</span>"
+            )
         st.markdown(
-            f'<div style="margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid #E2E8F0;"><span style="font-size: 2.2rem; font-weight: 800; color: #0F172A;">🏢 {filter_realtor_name} 전용 리포트</span><br><span style="font-size: 1.05rem; color: #64748B; font-weight: 500;">종료일({e_d.month}/{e_d.day}) 기준 최근 48시간 내 활동 이력이 있는 핵심 매물 분석 결과입니다.</span></div>',
+            f'<div style="margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid #E2E8F0;">'
+            f"{heading}<br>"
+            f'<span style="font-size: 1.05rem; color: #64748B; font-weight: 500;">'
+            f"종료일({e_d.month}/{e_d.day}) 기준 최근 48시간 내 활동 이력이 있는 핵심 매물 분석 결과입니다.</span>"
+            f"</div>",
             unsafe_allow_html=True,
         )
         with st.expander("📘 고객용 가이드 (백서)", expanded=False):
@@ -2415,7 +2461,12 @@ def main() -> None:
             if tl_plot.empty:
                 st.info(f"**{e_d}** 일자에 표시할 활동 매물이 없습니다.")
             else:
-                kst_now_cmd = _now_kst_naive()
+                mx_cmd = filtered_df["수집일시"].max()
+                kst_now_cmd = (
+                    pd.Timestamp(mx_cmd)
+                    if IS_DEMO_MODE and "수집일시" in filtered_df.columns and pd.notna(mx_cmd)
+                    else _now_kst_naive()
+                )
                 kst_today_cmd = kst_now_cmd.date()
 
                 t_df_cmd = filtered_df[filtered_df["단지명"] == _sel_complex].copy()
@@ -2487,11 +2538,59 @@ def main() -> None:
                         if not _row_cmd:
                             continue
                         _task_cmd, _act_cmd, _ai_cmd, _ts_cmd = _row_cmd
+                        _act_cmd = dict(_act_cmd)
+                        _ts_for_render = _ts_cmd
+                        if IS_DEMO_MODE:
+                            _ir = _idx_cmd % 3
+                            if _ir == 0:
+                                _act_cmd["status"] = "STRIKE"
+                            elif _ir == 1:
+                                _act_cmd["status"] = "WAIT"
+                                if _ts_cmd:
+                                    _ts_for_render = deepcopy(_ts_cmd)
+
+                                    def _demo_freq_sort_score(info: dict) -> int:
+                                        freq = str(info.get("freq", ""))
+                                        if "매일" in freq:
+                                            return 5
+                                        if "2일" in freq:
+                                            return 4
+                                        if "3~4일" in freq:
+                                            return 3
+                                        if "주 1~2회" in freq:
+                                            return 2
+                                        if "비정기" in freq:
+                                            return 1
+                                        return 0
+
+                                    _demo_comp_msgs = [
+                                        "🟢 오늘 광고 완료 (최근 진행)",
+                                        "🔴 아직 활동 전 (주의)",
+                                        "🔥 매일 갱신 (오전 주력)",
+                                        "🟢 오늘 광고 완료 (오전 진행)",
+                                    ]
+                                    _sorted_demo = sorted(
+                                        _ts_for_render.items(),
+                                        key=lambda x: (
+                                            -_demo_freq_sort_score(x[1]),
+                                            not x[1].get("is_waiting"),
+                                            str(x[1].get("display", "")),
+                                        ),
+                                    )
+                                    for _j, (_, _info) in enumerate(_sorted_demo):
+                                        _html_s = str(_info.get("html", ""))
+                                        _parts = _html_s.split("<br>", 1)
+                                        _tail = "<br>" + _parts[1] if len(_parts) > 1 else ""
+                                        _info["html"] = (
+                                            f"<b>{_demo_comp_msgs[_j % 4]}</b>{_tail}"
+                                        )
+                            else:
+                                _act_cmd["status"] = "FREE"
                         _status_label, _status_accent = _status_badge_from_action(_act_cmd)
                         _ai_summary = _format_ai_recommendation_summary(_ai_cmd)
                         _render_command_summary_row(
                             _task_cmd,
-                            _ts_cmd,
+                            _ts_for_render,
                             status_label=_status_label,
                             status_accent=_status_accent,
                             ai_summary=_ai_summary,
@@ -2518,6 +2617,16 @@ def main() -> None:
             df_trend = pd.DataFrame(trend_data)
             if df_trend.empty:
                 df_trend = pd.DataFrame([{"날짜": e_d, "점수": float(eff_total)}])
+
+            if IS_DEMO_MODE and not df_trend.empty:
+                _demo_trend_y = [60, 67, 63, 68, 65, 71, 69, 73, 71, 74, 71, 77, 72, 80]
+                n_t = len(df_trend)
+                if n_t <= len(_demo_trend_y):
+                    _ys = _demo_trend_y[-n_t:]
+                else:
+                    _ys = list(_demo_trend_y) + [_demo_trend_y[-1]] * (n_t - len(_demo_trend_y))
+                df_trend = df_trend.copy()
+                df_trend["점수"] = [float(x) for x in _ys[:n_t]]
 
             # 차트 렌더링
             fig_spark = px.line(df_trend, x="날짜", y="점수", markers=True)
