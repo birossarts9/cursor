@@ -1889,11 +1889,21 @@ def _precompute_all_complexes_data_impl(
 
         # --- [추가] 탭 4: 시장 점유율 및 타사 패턴 사전 계산 ---
         # comp_df(오늘 요일 마지노선)을 먼저 구축한 뒤 AI 추천과 동일한 '뇌'로 전달
-        _ms_cols = ["단지명", "동/호수", "층/타입", "거래방식", "가격", "부동산명", "묶음내순위"]
+        _ms_cols = [
+            "단지명",
+            "동/호수",
+            "층/타입",
+            "거래방식",
+            "가격",
+            "부동산명",
+            "묶음내순위",
+            "매물묶음키",
+        ]
         if not all(c in t_df.columns for c in _ms_cols):
             ms_df = pd.DataFrame(columns=["부동산명", "매물건수", "총점수"])
             comp_df = pd.DataFrame(columns=["부동산명", "총횟수", "갱신빈도"])
         else:
+            # --- [공식 통일] 탭 4: 시장 점유율 사전 계산 (AI 광고 효율 총점 % 기반)
             t_df_ms = t_df.copy()
             if "CP사" not in t_df_ms.columns:
                 t_df_ms["CP사"] = ""
@@ -1908,38 +1918,32 @@ def _precompute_all_complexes_data_impl(
                 errors="coerce",
             ).fillna(999)
 
-            # [수정] 순위가 높은(숫자가 작은) 순으로 정렬 후 CP사·부동산명 기준 중복 제거
-            uniq = t_df_ms.sort_values("_순위정렬").drop_duplicates(
-                subset=[
-                    "단지명",
-                    "동/호수",
-                    "층/타입",
-                    "거래방식",
-                    "가격",
-                    "부동산명_정제",
-                    "CP사",
-                    "방향",
-                ]
-            ).copy()
-
-            uniq["묶음_총개수"] = uniq.groupby(
-                ["단지명", "동/호수", "층/타입", "거래방식", "가격", "CP사", "방향"]
-            )["부동산명_정제"].transform("count")
-
-            uniq["파워점수"] = 10 + (10 / uniq["_순위정렬"]) + (uniq["묶음_총개수"] * 0.1)
-
-            ms_df = (
-                uniq.groupby("부동산명_정제", dropna=False)
-                .agg(매물건수=("부동산명_정제", "count"), 총점수=("파워점수", "sum"))
-                .reset_index()
-                .rename(columns={"부동산명_정제": "부동산명"})
+            ms_base = t_df_ms.groupby("부동산명_정제").agg(
+                매물건수=("매물묶음키", "nunique"),
+                전체노출건수=("매물묶음키", "count"),
             )
-            ms_df["총점수"] = ms_df["총점수"].round().astype(int)
+            top3_counts = (
+                t_df_ms[t_df_ms["_순위정렬"] <= 3]
+                .groupby("부동산명_정제")
+                .size()
+                .rename("상위노출건수")
+            )
+            ms_df = ms_base.join(top3_counts).fillna(0).reset_index()
+
+            ms_df["전체노출건수"] = ms_df["전체노출건수"].replace(0, np.nan)
+            ms_df["총점수"] = (
+                (ms_df["상위노출건수"] / ms_df["전체노출건수"]) * 100
+            ).fillna(0).round().astype(int)
+            ms_df = (
+                ms_df.rename(columns={"부동산명_정제": "부동산명"})
+                .sort_values("총점수", ascending=False)
+            )
 
             _ts_all = pd.to_datetime(df_to_process["수집일시"], errors="coerce")
             if _ts_all.notna().any():
-                _dmin, _dmax = _ts_all.min().date(), _ts_all.max().date()
-                analysis_days = max(1, (_dmax - _dmin).days + 1)
+                analysis_days = max(
+                    1, (_ts_all.max().date() - _ts_all.min().date()).days + 1
+                )
             else:
                 analysis_days = 1
 
@@ -1963,12 +1967,15 @@ def _precompute_all_complexes_data_impl(
                     return "🚶 3~4일에 1번"
                 if freq <= 8.0:
                     return "🐢 주 1~2회"
-                return "💤 비정기적 (월 1~2회)"
+                return "💤 비정기적"
 
             comp_df = (
                 b_df_comp.dropna(subset=["부동산명_정제"])
                 .groupby("부동산명_정제", dropna=False)
-                .agg(총횟수=("부동산명_정제", "count"), 갱신빈도=("수집일시", _calc_renew_freq))
+                .agg(
+                    총횟수=("부동산명_정제", "count"),
+                    갱신빈도=("수집일시", _calc_renew_freq),
+                )
                 .reset_index()
                 .rename(columns={"부동산명_정제": "부동산명"})
                 .sort_values("총횟수", ascending=False)
@@ -2059,18 +2066,32 @@ def _precompute_all_complexes_data_impl(
                     }
                 )
 
-            pattern_df = (
-                b_df_comp.dropna(subset=["부동산명_정제"])
-                .groupby("부동산명_정제")
-                .apply(_get_pattern_details, include_groups=False)
-                .reset_index()
-                .rename(columns={"부동산명_정제": "부동산명"})
-            )
+            patterns = []
+            for r_name, group in b_df_comp.dropna(subset=["부동산명_정제"]).groupby(
+                "부동산명_정제"
+            ):
+                res_series = _get_pattern_details(group)
+                res_dict = res_series.to_dict()
+                res_dict["부동산명"] = r_name
+                patterns.append(res_dict)
 
-            # 기존 comp_df에 계산된 패턴 데이터 병합
-            comp_df = comp_df.merge(pattern_df, on="부동산명", how="left").sort_values(
-                "총횟수", ascending=False
-            )
+            if patterns:
+                pattern_df = pd.DataFrame(patterns)
+                comp_df = comp_df.merge(pattern_df, on="부동산명", how="left").sort_values(
+                    "총횟수", ascending=False
+                )
+            else:
+                for col in [
+                    "주력 갱신 시간",
+                    "예측 신뢰도",
+                    "오늘_요일_그룹",
+                    "오늘 요일 주력 시간",
+                    "오늘 요일 마지노선",
+                    "오늘요일_실측",
+                ]:
+                    comp_df[col] = "-"
+                comp_df["오늘 요일 마지노선"] = 18
+                comp_df["오늘요일_실측"] = False
 
         act_df, tl_df = compute_prime_action_df(trk, boosted_df, realtor_name, comp_df)
 
@@ -2106,6 +2127,61 @@ def precompute_all_complexes_data(
     return _precompute_all_complexes_data_impl(
         df_to_process, complexes_list, realtor_name, target_date
     )
+
+
+@st.cache_data(show_spinner=False)
+def load_fast_demo_state_v4(real_realtor_name: str):
+    raw = load_server_data()
+    if raw is None or raw.empty:
+        return None
+
+    # 1. 타겟 부동산 행만 (원본 부동산명 기준 substring)
+    d = raw.loc[
+        raw["부동산명"].fillna("").astype(str).str.contains(real_realtor_name, na=False)
+    ].copy()
+    if d.empty:
+        return None
+
+    d = process_data(d)
+    if "CP사" in d.columns:
+        d = d[~d["CP사"].fillna("").astype(str).str.contains("한국공인중개사협회", na=False)].copy()
+    d = _prepare_listing_identity(d)
+    d["수집일시"] = pd.to_datetime(d["수집일시"], errors="coerce")
+
+    # 2. 날짜 고정 (5/4 ~ 5/18)
+    s_dt = pd.to_datetime("2026-05-04 00:00:00")
+    e_dt = pd.to_datetime("2026-05-18 23:59:59")
+    f_df = d.loc[(d["수집일시"] >= s_dt) & (d["수집일시"] <= e_dt)].copy()
+    if f_df.empty:
+        return None
+
+    # 3. 익명화 (단지·동호·타 중개사명)
+    f_df["단지명"] = "사랑동행복단지"
+    f_df["동/호수"] = "비공개동/호수"
+
+    unique_realtors = f_df["부동산명"].dropna().unique()
+    rename_map: dict[str, str] = {}
+    comp_idx = 1
+    for r in unique_realtors:
+        rs = str(r).strip()
+        if real_realtor_name in rs:
+            rename_map[rs] = "사랑공인중개사사무소"
+        else:
+            rename_map[rs] = f"경쟁사 {chr(64 + comp_idx)}부동산"
+            comp_idx += 1
+            if comp_idx > 26:
+                comp_idx = 1
+
+    f_df["부동산명"] = f_df["부동산명"].astype(str).map(rename_map).fillna(f_df["부동산명"])
+
+    # 단지명·동/호 변경 반영 위해 식별 키 재구축
+    f_df = _prepare_listing_identity(f_df)
+
+    c_list = ["사랑동행복단지"]
+    m_dict = _precompute_all_complexes_data_impl(
+        f_df, c_list, "사랑공인중개사사무소", e_dt.date()
+    )
+    return f_df, c_list, m_dict, e_dt.date(), s_dt.date()
 
 
 def main() -> None:
@@ -2151,26 +2227,6 @@ def main() -> None:
     )
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # [초고속 데모 전용 캐시 함수 - 하드디스크 영구 박제]
-    @st.cache_data(show_spinner=False, persist="disk")
-    def load_fast_demo_state_v2():
-        demo_path = os.path.join(BASE_DIR, "demo_market_report.parquet")
-        if not os.path.exists(demo_path):
-            return None
-        r_df = pd.read_parquet(demo_path)
-        d = process_data(r_df)
-        if "CP사" in d.columns:
-            d = d[~d["CP사"].fillna("").astype(str).str.contains("한국공인중개사협회", na=False)].copy()
-        d = _prepare_listing_identity(d)
-        d["수집일시"] = pd.to_datetime(d["수집일시"], errors="coerce")
-        t_kst = d["수집일시"].max().date()
-        s_dt = pd.to_datetime(t_kst - timedelta(days=2))
-        e_dt = pd.to_datetime(t_kst) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
-        f_df = d.loc[(d["수집일시"] >= s_dt) & (d["수집일시"] <= e_dt)]
-        c_list = sorted(f_df["단지명"].dropna().unique().tolist())
-        m_dict = _precompute_all_complexes_data_impl(f_df, c_list, "사랑공인중개사사무소", t_kst)
-        return f_df, c_list, m_dict, t_kst, s_dt.date()
-
     try:
         host_url = st.context.headers.get("host", "")
     except Exception:
@@ -2182,13 +2238,19 @@ def main() -> None:
     IS_DEMO_DOMAIN = "toprank-ai.com" in host_url or not user_id or user_id == "demo"
 
     if IS_DEMO_DOMAIN:
+        # realtors.json id `b456` → 실명 (데모에서는 익명화 파이프라인으로만 사용)
+        real_target_realtor = "다산자이골드"
+
         filter_realtor_name = "사랑공인중개사사무소"
         display_realtor = filter_realtor_name
         IS_DEMO_MODE = True
 
-        demo_state = load_fast_demo_state_v2()
+        demo_state = load_fast_demo_state_v4(real_target_realtor)
         if demo_state is None:
-            st.error("⚠️ 데모 데이터가 없습니다. 터미널에서 `python make_demo.py`를 실행하세요.")
+            st.error(
+                "⚠️ 데모 데이터를 만들 수 없습니다. 서버 크롤 데이터에 해당 부동산(기간 내) 행이 없거나 "
+                "`load_server_data()`가 비었습니다."
+            )
             st.stop()
 
         filtered_df, _complex_choices, master_data_dict, today_kst, default_start_date = demo_state
@@ -2772,7 +2834,9 @@ def main() -> None:
                 )
         with tab_ms:
             st.markdown("#### 🏆 단지 내 시장 점유율 (M/S) Top 10")
-            st.caption("파워점수 공식 = 기본(10) + 순위가점(10/순위) + 물량가점(묶음개수*0.1)")
+            st.caption(
+                "※ **AI 광고 효율 총점** = 해당 단지의 전체 노출 시간 중 내 매물이 상위권(1~3위)을 방어해 낸 비율(%)"
+            )
 
             c_m1, c_m2 = st.columns([1, 1.2])
             if not ms_df.empty:
@@ -2788,8 +2852,11 @@ def main() -> None:
                 top10_ms = ms_df.sort_values("총점수", ascending=False).head(10)
 
                 with c_m1:
+                    disp_df = top10_ms[["부동산명_축약", "매물건수", "총점수"]].rename(
+                        columns={"총점수": "AI 광고 효율 총점"}
+                    )
                     st.dataframe(
-                        top10_ms[["부동산명_축약", "매물건수", "총점수"]],
+                        disp_df,
                         use_container_width=True,
                         hide_index=True,
                     )
