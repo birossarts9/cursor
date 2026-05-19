@@ -670,6 +670,117 @@ def _action_urgency_rank(action: dict) -> int:
 
 _TASK_SORT_OPTIONS = ("광고 횟수 순", "이름 오름차순")
 
+# 데모 UI 전용 (분석 엔진·변수명 변경 없음, 렌더 직전 패치)
+_DEMO_UI_AI_TIME_SLOTS: list[tuple[str, str]] = [
+    ("13:40", "14:25"),
+    ("14:15", "15:50"),
+    ("15:20", "16:30"),
+    ("13:05", "14:40"),
+    ("14:45", "15:55"),
+    ("16:10", "17:20"),
+    ("12:50", "13:55"),
+    ("15:50", "16:25"),
+    ("13:25", "14:15"),
+    ("14:30", "15:40"),
+]
+_DEMO_UI_COMP_DAY_PROGRESS = [
+    "09:25",
+    "10:40",
+    "11:15",
+    "13:35",
+    "14:10",
+    "15:50",
+    "16:20",
+]
+_DEMO_UI_COMP_PATTERN_LINES = [
+    "평소 09~11시 ➔ 오전 10시 위주",
+    "평소처럼 10~12시에 집중합니다",
+    "평소 13~15시 ➔ 오후 14시 위주",
+    "평소처럼 11~13시에 집중합니다",
+    "평소 14~16시 ➔ 오후 15시 위주",
+]
+_DEMO_UI_COMP_FREQ_LABELS = ["🔥 매일 갱신", "⚡ 2일에 1번", "🚶 3~4일에 1번"]
+_DEMO_MS_HERO_NAME = "사랑공인중개사사무소"
+
+
+def _demo_ui_ai_recommendation_msg(bundle_idx: int) -> str:
+    t1, t2 = _DEMO_UI_AI_TIME_SLOTS[bundle_idx % len(_DEMO_UI_AI_TIME_SLOTS)]
+    return f"💡 1순위: {t1} / 2순위: {t2}"
+
+
+def _demo_ui_patch_target_status(target_status: dict, *, act_status: str) -> dict:
+    """광고 전술판 상세보기 경쟁사 카드 — 데모 연출용 HTML·freq만 교체 (STRIKE/WAIT 분기)."""
+    if not target_status:
+        return target_status
+    out = deepcopy(target_status)
+    _gray = "color:#64748b;font-size:0.9rem;"
+    _small = "color:#94a3b8;font-size:0.8rem;"
+    st_code = str(act_status or "FREE").upper()
+    strike_all_done = st_code == "STRIKE"
+    wait_mixed = st_code == "WAIT"
+
+    def _freq_sort_score(info: dict) -> int:
+        freq = str(info.get("freq", ""))
+        if "매일" in freq:
+            return 5
+        if "2일" in freq:
+            return 4
+        if "3~4일" in freq:
+            return 3
+        return 0
+
+    ordered = sorted(
+        out.items(),
+        key=lambda x: (
+            -_freq_sort_score(x[1]),
+            not x[1].get("is_waiting"),
+            str(x[1].get("display", "")),
+        ),
+    )
+    for j, (_, info) in enumerate(ordered):
+        prog = _DEMO_UI_COMP_DAY_PROGRESS[j % len(_DEMO_UI_COMP_DAY_PROGRESS)]
+        pat = _DEMO_UI_COMP_PATTERN_LINES[j % len(_DEMO_UI_COMP_PATTERN_LINES)]
+        info["freq"] = _DEMO_UI_COMP_FREQ_LABELS[j % len(_DEMO_UI_COMP_FREQ_LABELS)]
+        deadline = 11 + (j % 3) * 2
+        if strike_all_done or st_code == "FREE":
+            state_line = f"<b>🟢 오늘 광고 완료 ({prog} 진행)</b>"
+            info["is_waiting"] = False
+            info["is_done_today"] = True
+        elif wait_mixed and j % 4 == 1:
+            state_line = "<b>🔴 아직 활동 전 (주의)</b>"
+            info["is_waiting"] = True
+            info["is_done_today"] = False
+        else:
+            state_line = f"<b>🟢 오늘 광고 완료 ({prog} 진행)</b>"
+            info["is_waiting"] = False
+            info["is_done_today"] = True
+        info["last_active_time"] = prog
+        info["html"] = (
+            f"{state_line}"
+            f"<br><span style='{_gray}'>{html.escape(pat)}</span>"
+            f"<br><span style='{_small}'>마지노선: {deadline}시</span>"
+        )
+    return out
+
+
+def _demo_ui_inject_ms_hero_row(ms_df: pd.DataFrame) -> pd.DataFrame:
+    """M/S 탭 — 주체 중개사 행 강제 주입(총점 69, 2위권 연출)."""
+    base = ms_df.copy() if ms_df is not None and not ms_df.empty else pd.DataFrame()
+    if not base.empty and "부동산명" in base.columns:
+        base = base[base["부동산명"].astype(str) != _DEMO_MS_HERO_NAME].copy()
+    inject = {
+        "부동산명": _DEMO_MS_HERO_NAME,
+        "매물건수": 85,
+        "총점수": 69,
+        "전체노출건수": 120,
+        "상위노출건수": 83,
+    }
+    row_df = pd.DataFrame([inject])
+    merged = row_df if base.empty else pd.concat([base, row_df], ignore_index=True)
+    if "총점수" in merged.columns:
+        merged = merged.sort_values("총점수", ascending=False).reset_index(drop=True)
+    return merged
+
 
 def _dong_ho_sort_key(task: str) -> str:
     """Task 라벨에서 동/호수(앞부분) 추출 — 이름 정렬용."""
@@ -2174,7 +2285,13 @@ def load_fast_demo_state_v4(real_realtor_name):
 
     f_df["부동산명"] = f_df["부동산명"].map(rename_map).fillna(f_df["부동산명"])
     f_df["단지명"] = "사랑동행복단지"
-    f_df["동/호수"] = "비공개동/호수"
+    _dong_grp_cols = [c for c in ["동/호수", "층/타입", "거래방식", "가격", "CP사"] if c in f_df.columns]
+    if _dong_grp_cols:
+        _bundle_key = f_df[_dong_grp_cols].fillna("").astype(str).agg(" | ".join, axis=1)
+        _bundle_code = pd.factorize(_bundle_key)[0]
+        f_df["동/호수"] = [f"{101 + (int(c) % 4)}동" for c in _bundle_code]
+    else:
+        f_df["동/호수"] = "101동"
 
     # 4. 후처리 파이프라인 동기화 (동/호·부동산명 반영 키 재구성; 순위·점수 산정 없음)
     f_df = process_data(f_df)
@@ -2397,6 +2514,12 @@ def main() -> None:
                 f"🏢 {title_esc} 전용 리포트</span>"
             )
         st.markdown(
+            '<p style="font-size: 1.1rem; font-weight: 700; color: #2563EB; '
+            'margin-bottom: 4px; margin-top: 10px;">'
+            "💡체험단 문의는 010-8416-2806 으로 연락주세요.</p>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
             f'<div style="margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid #E2E8F0;">'
             f"{heading}<br>"
             f'<span style="font-size: 1.05rem; color: #64748B; font-weight: 500;">'
@@ -2531,6 +2654,8 @@ def main() -> None:
                     _sorted_cmd_tasks = _sort_tracking_tasks(
                         active_tasks_cmd, action_df, _cmd_sort_mode
                     )
+                    if IS_DEMO_MODE:
+                        _sorted_cmd_tasks = _sorted_cmd_tasks[:10]
                     _cmd_by_task = {row[0]: row for row in _command_rows}
 
                     for _idx_cmd, _task_cmd in enumerate(_sorted_cmd_tasks):
@@ -2546,46 +2671,13 @@ def main() -> None:
                                 _act_cmd["status"] = "STRIKE"
                             elif _ir == 1:
                                 _act_cmd["status"] = "WAIT"
-                                if _ts_cmd:
-                                    _ts_for_render = deepcopy(_ts_cmd)
-
-                                    def _demo_freq_sort_score(info: dict) -> int:
-                                        freq = str(info.get("freq", ""))
-                                        if "매일" in freq:
-                                            return 5
-                                        if "2일" in freq:
-                                            return 4
-                                        if "3~4일" in freq:
-                                            return 3
-                                        if "주 1~2회" in freq:
-                                            return 2
-                                        if "비정기" in freq:
-                                            return 1
-                                        return 0
-
-                                    _demo_comp_msgs = [
-                                        "🟢 오늘 광고 완료 (최근 진행)",
-                                        "🔴 아직 활동 전 (주의)",
-                                        "🔥 매일 갱신 (오전 주력)",
-                                        "🟢 오늘 광고 완료 (오전 진행)",
-                                    ]
-                                    _sorted_demo = sorted(
-                                        _ts_for_render.items(),
-                                        key=lambda x: (
-                                            -_demo_freq_sort_score(x[1]),
-                                            not x[1].get("is_waiting"),
-                                            str(x[1].get("display", "")),
-                                        ),
-                                    )
-                                    for _j, (_, _info) in enumerate(_sorted_demo):
-                                        _html_s = str(_info.get("html", ""))
-                                        _parts = _html_s.split("<br>", 1)
-                                        _tail = "<br>" + _parts[1] if len(_parts) > 1 else ""
-                                        _info["html"] = (
-                                            f"<b>{_demo_comp_msgs[_j % 4]}</b>{_tail}"
-                                        )
                             else:
                                 _act_cmd["status"] = "FREE"
+                            _ai_cmd = _demo_ui_ai_recommendation_msg(_idx_cmd)
+                            if _ts_cmd:
+                                _ts_for_render = _demo_ui_patch_target_status(
+                                    _ts_cmd, act_status=str(_act_cmd.get("status", "FREE"))
+                                )
                         _status_label, _status_accent = _status_badge_from_action(_act_cmd)
                         _ai_summary = _format_ai_recommendation_summary(_ai_cmd)
                         _render_command_summary_row(
@@ -2619,7 +2711,7 @@ def main() -> None:
                 df_trend = pd.DataFrame([{"날짜": e_d, "점수": float(eff_total)}])
 
             if IS_DEMO_MODE and not df_trend.empty:
-                _demo_trend_y = [60, 67, 63, 68, 65, 71, 69, 73, 71, 74, 71, 77, 72, 80]
+                _demo_trend_y = [55, 67, 63, 68, 65, 71, 69, 73, 71, 74, 71, 77, 72, 84]
                 n_t = len(df_trend)
                 if n_t <= len(_demo_trend_y):
                     _ys = _demo_trend_y[-n_t:]
@@ -2725,6 +2817,8 @@ def main() -> None:
                         sort_info[t] = ("", 0, "기록 없음", None)
 
                 task_order = _sort_tracking_tasks(unique_tasks, action_df, _tl_sort_mode)
+                if IS_DEMO_MODE:
+                    task_order = task_order[:10]
                 ticktext_list = [
                     f"{t}  ·  🔄 {sort_info[t][1]}회  ·  🕒 {sort_info[t][2]}"
                     for t in task_order
@@ -2948,14 +3042,21 @@ def main() -> None:
             )
 
             c_m1, c_m2 = st.columns([1, 1.2])
+            if IS_DEMO_MODE:
+                ms_df = _demo_ui_inject_ms_hero_row(ms_df)
             if not ms_df.empty:
                 ms_df = ms_df.copy()
                 ms_df["부동산명_축약"] = ms_df["부동산명"].apply(
-                    lambda x: mask_text(
-                        clean_realtor_name(x),
-                        is_demo=IS_DEMO_MODE,
-                        filter_realtor_name=filter_realtor_name,
-                        display_realtor=display_realtor,
+                    lambda x: (
+                        display_realtor
+                        if IS_DEMO_MODE
+                        and str(x).strip() == _DEMO_MS_HERO_NAME
+                        else mask_text(
+                            clean_realtor_name(x),
+                            is_demo=IS_DEMO_MODE,
+                            filter_realtor_name=filter_realtor_name,
+                            display_realtor=display_realtor,
+                        )
                     )
                 )
                 top10_ms = ms_df.sort_values("총점수", ascending=False).head(10)
@@ -2974,7 +3075,19 @@ def main() -> None:
                     cleaned_my_realtor = clean_realtor_name(display_realtor)
                     top10_ms_chart = top10_ms_chart.copy()
                     top10_ms_chart["색상"] = top10_ms_chart["부동산명_축약"].apply(
-                        lambda x: "#3B82F6" if x == cleaned_my_realtor else "#E2E8F0"
+                        lambda x: (
+                            "#3B82F6"
+                            if (
+                                str(x) == display_realtor
+                                or str(x) == cleaned_my_realtor
+                                or clean_realtor_name(x) == cleaned_my_realtor
+                                or (
+                                    IS_DEMO_MODE
+                                    and str(x).strip() == _DEMO_MS_HERO_NAME
+                                )
+                            )
+                            else "#E2E8F0"
+                        )
                     )
 
                     fig_ms = px.bar(
@@ -3000,7 +3113,7 @@ def main() -> None:
 
         with tab_conclusion:
             st.markdown("### 🔬 5월 실제 데이터 기반 마켓 리서치 보고서")
-            st.markdown("수천 건의 네이버 부동산 실시간 수집 데이터를 정밀 분석하여 통계학적으로 입증된 **최상위 노출의 핵심 법칙**입니다.")
+            st.markdown("수십만 건의 네이버 부동산 실시간 수집 데이터를 정밀 분석하여 통계학적으로 입증된 **최상위 노출의 핵심 법칙**입니다.")
             st.write("")
 
             # 1. 데이터 정의 및 차트 먼저 생성 (정렬용)
@@ -3058,7 +3171,7 @@ def main() -> None:
                 st.markdown(
                     "**“광고 갱신은 상위권(1~3위)에 진입하기 위한 가장 확실한 열쇠입니다.”**<br><br>"
                     "실제 분석 결과, 단지 규모에 관계없이 광고 갱신 시 **75.9% ~ 80.3%**라는 압도적인 도달률로 상위권 노출에 성공했습니다.<br>"
-                    "다만 대단지일수록 네이버 반영 지연 시간이 길어지므로 전략적 타이밍 갱신이 결합되어야 효율을 극대화할 수 있습니다.",
+                    "광고 갱신이 상위권에 도달하는 유일한 방법인 것 만큼은 확실합니다. 타이밍 갱신 전략이 결합되면 효율을 극대화할 수 있습니다.",
                     unsafe_allow_html=True
                 )
 
@@ -3066,8 +3179,8 @@ def main() -> None:
                 st.markdown("#### 2️⃣ 가설 2. 최적의 갱신 타이밍 (Last Mover 효과)")
                 st.markdown(
                     "**“가장 마지막에 광고한 집단이 경쟁이 치열한 시간대 대비 방어율이 최대 43%p 높았습니다.”**<br><br>"
-                    "타 중개업소들이 우후죽순 광고를 몰아치는 혼잡 시간대(일반 경쟁 시간대)의 순위 방어율은 **17.8%~49.2%**에 불과했습니다.<br>"
-                    "반면, 경쟁사들의 세팅이 모두 끝난 직후 빈집을 노린 집단(**탑랭크 AI 추천 타이밍**)은 방어율이 **60.4%~73.1%**로 치솟으며 오랜 시간 상위권을 안정적으로 독점했습니다.",
+                    "타 중개업소들이 너도나도 광고를 몰아치는 혼잡 시간대(일반 경쟁 시간대)의 순위 방어율은 **17.8%~49.2%**에 불과했습니다.<br>"
+                    "반면, 경쟁사들의 세팅이 모두 끝난 직후 빈집을 노린 집단은 방어율이 **60.4%~73.1%**로 치솟으며 오랜 시간 상위권을 안정적으로 독점했습니다.",
                     unsafe_allow_html=True
                 )
 
