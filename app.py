@@ -35,7 +35,6 @@ from ranking_logic import (
     _hours_excluding_daily_midnight_to_8am,
     build_listing_tracking_keys,
     filter_exclude_sunday_rows,
-    precalculate_ai_strategy,
 )
 
 _APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -322,6 +321,7 @@ def _ensure_direction_and_tracking_key(df: pd.DataFrame) -> pd.DataFrame:
 
 def _drop_standalone_listings(df: pd.DataFrame) -> pd.DataFrame:
     """경쟁 부동산이 없는 단독 매물을 타임라인/분석 전체에서 제외."""
+    return df
     if df.empty or "매물묶음키" not in df.columns:
         return df
 
@@ -477,11 +477,9 @@ _WAIT_NEAR_THRESHOLD_MIN = 30    # 임박(30분 이내)이면 대기 메시지�
 def _determine_action_state(
     target_status: dict,
     any_waiting: bool,
-    ai_msg: str,
-    kst_now: pd.Timestamp,
 ) -> dict:
     """
-    실시간 경쟁사 상황과 AI 다중 추천을 종합한 상태 판단.
+    실시간 경쟁사 상황 기반 상태 판단.
     반환: {status, title, reason, palette}
         status: "STRIKE" | "WAIT" | "FREE"
         palette: 카드 색상 (bg / border / accent / text)
@@ -508,7 +506,6 @@ def _determine_action_state(
         "subtext": "#047857",
     }
 
-    # 데이터·경쟁사 자체가 없는 경우 → 자유 갱신
     if not target_status:
         return {
             "status": "FREE",
@@ -520,86 +517,26 @@ def _determine_action_state(
             "palette": palette_free,
         }
 
-    ai_primary = _parse_ai_primary_time(ai_msg)
-    now_min = kst_now.hour * 60 + kst_now.minute
     waiting_cnt = sum(1 for info in target_status.values() if info.get("is_waiting"))
-
-    # AI 추천 시각이 명시되지 않은 경우 (자유 갱신 메시지·파싱 실패)
-    if ai_primary is None:
-        if any_waiting:
-            return {
-                "status": "WAIT",
-                "title": "🛑 대기 권장",
-                "reason": (
-                    f"요주의 경쟁사 {waiting_cnt}곳이 아직 활동 전입니다. "
-                    "이들이 갱신을 마친 뒤 타격하면 노출 효과가 훨씬 오래갑니다."
-                ),
-                "palette": palette_wait,
-            }
+    if any_waiting:
         return {
-            "status": "STRIKE",
-            "title": "🚀 AI 광고 추천 시간",
+            "status": "WAIT",
+            "title": "🛑 대기 권장",
             "reason": (
-                "주요 경쟁사들이 오늘 활동을 마쳤거나 일정 외 시간입니다. "
-                "지금 갱신해도 빈집을 노릴 수 있습니다."
+                f"요주의 경쟁사 {waiting_cnt}곳이 아직 활동 전입니다. "
+                "이들이 갱신을 마친 뒤 타격하면 노출 효과가 훨씬 오래갑니다."
             ),
-            "palette": palette_strike,
+            "palette": palette_wait,
         }
-
-    ai_min = ai_primary[0] * 60 + ai_primary[1]
-    diff_min = ai_min - now_min
-    hh, mm = ai_primary
-    ai_hhmm = f"{hh:02d}:{mm:02d}"
-
-    # (A) AI 추천 시각에 도달했거나 이미 지났음 → 지금 광고
-    if diff_min <= _AI_REACH_GRACE_MINUTES:
-        if not any_waiting:
-            reason = (
-                f"AI 1순위 추천 시각({ai_hhmm})에 도달했고, "
-                "주요 경쟁사들이 활동을 마쳤습니다. 지금이 최적의 타이밍입니다."
-            )
-        else:
-            reason = (
-                f"AI 1순위 추천 시각({ai_hhmm})에 도달했습니다. "
-                f"요주의 경쟁사 {waiting_cnt}곳이 남아있지만, 추천 시각의 빈집 점수가 더 높습니다."
-            )
-        return {
-            "status": "STRIKE",
-            "title": "🚀 AI 광고 추천 시간",
-            "reason": reason,
-            "palette": palette_strike,
-        }
-
-    # (B) 경쟁사들이 이미 모두 활동 종료 → 빈집이 일찍 열림
-    if not any_waiting:
-        return {
-            "status": "STRIKE",
-            "title": "🚀 AI 광고 추천 시간",
-            "reason": (
-                f"AI 1순위 추천 시각({ai_hhmm})까지 {diff_min//60}시간 {diff_min%60}분 남았지만, "
-                "주요 경쟁사들이 이미 오늘 활동을 마쳤습니다. AI 시간을 기다리지 말고 지금 타격하세요."
-            ),
-            "palette": palette_strike,
-        }
-
-    # (C) AI 시간 도달 전 + 요주의 경쟁사 남음 → 대기 권장
-    if diff_min <= _WAIT_NEAR_THRESHOLD_MIN:
-        reason = (
-            f"AI 1순위 추천 시각({ai_hhmm})까지 {diff_min}분 남았습니다. "
-            f"요주의 경쟁사 {waiting_cnt}곳이 활동 중이니 이 시각을 지키는 것이 안전합니다."
-        )
-    else:
-        reason = (
-            f"AI 1순위 추천 시각({ai_hhmm})까지 {diff_min//60}시간 {diff_min%60}분 남았고, "
-            f"요주의 경쟁사 {waiting_cnt}곳이 아직 활동 전입니다. "
-            "지금 갱신하면 곧 경쟁사 갱신에 묻혀 효과가 빠르게 소멸됩니다."
-        )
 
     return {
-        "status": "WAIT",
-        "title": "🛑 대기 권장",
-        "reason": reason,
-        "palette": palette_wait,
+        "status": "STRIKE",
+        "title": "🚀 지금 광고",
+        "reason": (
+            "주요 경쟁사들이 오늘 활동을 마쳤습니다. "
+            "지금 갱신해도 빈집을 노릴 수 있습니다."
+        ),
+        "palette": palette_strike,
     }
 
 
@@ -867,7 +804,16 @@ def _command_summary_cell(text: str, *, accent: str | None = None) -> None:
 
 
 def _command_summary_cell_ai(summary: str) -> None:
-    """요약 행 col3 — AI 접두어만 포인트 컬러, 본문은 일반체."""
+    """요약 행 col3 — 갱신 횟수 또는 AI 접두어 본문."""
+    if summary.startswith("🔄"):
+        st.markdown(
+            "<div style='background:#FFFFFF;border:1px solid #E2E8F0;border-radius:8px;"
+            "padding:12px 14px;min-height:52px;display:flex;align-items:center;"
+            "font-size:1rem;font-weight:400;color:#0F172A;line-height:1.45;word-break:break-word;'>"
+            f"{html.escape(summary)}</div>",
+            unsafe_allow_html=True,
+        )
+        return
     body = summary[3:].strip() if summary.startswith("AI") else summary
     st.markdown(
         "<div style='background:#FFFFFF;border:1px solid #E2E8F0;border-radius:8px;"
@@ -885,17 +831,23 @@ def _render_command_summary_row(
     *,
     status_label: str,
     status_accent: str,
-    ai_summary: str,
+    action_df: pd.DataFrame,
     expander_key: str,
 ) -> None:
-    """요약 행(상태|매물|AI) 3컬럼 + 하단 상세보기 익스팬더."""
+    """요약 행(상태|매물|갱신횟수) 3컬럼 + 하단 상세보기 익스팬더."""
+    renew_cnt = 0
+    _act_row = _find_action_row_for_task(task, action_df)
+    if _act_row is not None:
+        renew_cnt = int(pd.to_numeric(_act_row.get("광고 갱신 횟수", 0), errors="coerce") or 0)
+    renewal_summary = f"🔄 광고 갱신: {renew_cnt}회"
+
     col1, col2, col3 = st.columns([1, 1.5, 2.0])
     with col1:
         _command_summary_cell(status_label, accent=status_accent)
     with col2:
         _command_summary_cell(str(task))
     with col3:
-        _command_summary_cell_ai(ai_summary)
+        _command_summary_cell_ai(renewal_summary)
 
     st.markdown("<div style='height:5px;margin:0;padding:0;'></div>", unsafe_allow_html=True)
     with st.expander("상세보기", expanded=False, key=expander_key):
@@ -1515,7 +1467,12 @@ def _build_timeline_from_hist(
     tl["Start"] = pd.to_datetime(tl["수집일시"], errors="coerce")
     raw_next = pd.to_datetime(tl["다음수집일시"], errors="coerce")
     end_cap = batch_end_ts if pd.notna(batch_end_ts) else now_kst
-    tl["Finish"] = raw_next.fillna(end_cap)
+
+    # 최신 마감 시각(batch_end_ts)보다 24시간 이상 과거에 멈춘 매물은 강제 연장하지 않고 유실 처리
+    is_missing = (raw_next.isna()) & (tl["Start"] < (batch_end_ts - pd.Timedelta(hours=24)))
+    fallback_finish = tl["Start"] + pd.Timedelta(hours=2)
+
+    tl["Finish"] = np.where(is_missing, fallback_finish, raw_next.fillna(end_cap))
     tl["Finish"] = pd.to_datetime(tl["Finish"], errors="coerce")
     bad = tl["Finish"].isna() | (tl["Finish"] <= tl["Start"])
     tl.loc[bad, "Finish"] = tl.loc[bad, "Start"] + pd.Timedelta(seconds=1)
@@ -1811,10 +1768,6 @@ def _build_prime_action_df(
         last_is_top_map = {}
         last_top_ts_map = {}
 
-    master_strategy_dict = precalculate_ai_strategy(
-        trk, boosted_df, filter_realtor_name, comp_df
-    )
-
     # [초고속 최적화] 매물묶음키별 갱신 건수: per-key for문 대신 벡터화
     market_keys = b_work["매물묶음키"].dropna().unique().tolist()
     bw_sub = b_work.copy()
@@ -1911,7 +1864,7 @@ def _build_prime_action_df(
                 "Value / Waste 횟수": f"{int(value_by_bundle.get(bkey, 0))} / {w_cnt}",
                 "Waste 횟수": w_cnt,
                 "hold_minutes_raw": h_min,
-                "광고 추천 시간": master_strategy_dict.get(bkey, "✅ 자유 갱신"),
+                "광고 추천 시간": f"{renew_cnt}회",
             }
         )
 
@@ -2128,7 +2081,7 @@ def _precompute_all_complexes_data_impl(
                     h0 = idx_sorted[0]
                     return f"{h0:02d}시", min(h0 + 1, 23)
                 h0, h1 = idx_sorted[0], idx_sorted[1]
-                peak_str = f"{h0}~{h1}시"
+                peak_str = f"{h0}시, {h1}시"
                 deadline = max(h0, h1) + 1
                 return peak_str, min(deadline, 23)
 
@@ -2332,7 +2285,6 @@ def main() -> None:
         font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, sans-serif !important;
     }
     .stApp { background-color: #F8FAFC; }
-    header, footer {visibility: hidden;}
     .block-container {
         padding-top: 2rem !important;
         padding-bottom: 2.5rem !important;
@@ -2624,7 +2576,6 @@ def main() -> None:
                         "최근 28일 내 갱신 이력이 2건 미만인 매물(유령 부동산)은 지휘 통제 목록에서 제외됩니다."
                     )
                 else:
-                    strategy_dict_cmd = complex_data.get("strategy_dict", {})
                     _command_rows: list[tuple] = []
                     for _task_cmd in active_tasks_cmd:
                         _ts_cmd = _build_target_status_for_task(
@@ -2639,17 +2590,14 @@ def main() -> None:
                             filter_realtor_name=filter_realtor_name,
                             display_realtor=display_realtor,
                         )
-                        _ai_cmd = strategy_dict_cmd.get(_task_cmd, "") or ""
                         _any_wait_cmd = (
                             any(v.get("is_waiting") for v in _ts_cmd.values()) if _ts_cmd else False
                         )
                         _act_cmd = _determine_action_state(
                             target_status=_ts_cmd,
                             any_waiting=_any_wait_cmd,
-                            ai_msg=_ai_cmd,
-                            kst_now=kst_now_cmd,
                         )
-                        _command_rows.append((_task_cmd, _act_cmd, _ai_cmd, _ts_cmd))
+                        _command_rows.append((_task_cmd, _act_cmd, _ts_cmd))
 
                     _sorted_cmd_tasks = _sort_tracking_tasks(
                         active_tasks_cmd, action_df, _cmd_sort_mode
@@ -2662,7 +2610,7 @@ def main() -> None:
                         _row_cmd = _cmd_by_task.get(_task_cmd)
                         if not _row_cmd:
                             continue
-                        _task_cmd, _act_cmd, _ai_cmd, _ts_cmd = _row_cmd
+                        _task_cmd, _act_cmd, _ts_cmd = _row_cmd
                         _act_cmd = dict(_act_cmd)
                         _ts_for_render = _ts_cmd
                         if IS_DEMO_MODE:
@@ -2673,19 +2621,17 @@ def main() -> None:
                                 _act_cmd["status"] = "WAIT"
                             else:
                                 _act_cmd["status"] = "FREE"
-                            _ai_cmd = _demo_ui_ai_recommendation_msg(_idx_cmd)
                             if _ts_cmd:
                                 _ts_for_render = _demo_ui_patch_target_status(
                                     _ts_cmd, act_status=str(_act_cmd.get("status", "FREE"))
                                 )
                         _status_label, _status_accent = _status_badge_from_action(_act_cmd)
-                        _ai_summary = _format_ai_recommendation_summary(_ai_cmd)
                         _render_command_summary_row(
                             _task_cmd,
                             _ts_for_render,
                             status_label=_status_label,
                             status_accent=_status_accent,
-                            ai_summary=_ai_summary,
+                            action_df=action_df,
                             expander_key=f"cmd_detail_{_idx_cmd}",
                         )
 

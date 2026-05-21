@@ -309,7 +309,8 @@ def process_data(df):
     )
     df["_temp_name"] = cleaned_name.where(cleaned_name.ne(""), df["부동산명"].astype(str))
     df = df.sort_values(["수집일시", "전체순위_숫자"], ascending=[True, True])
-    df = df.drop_duplicates(subset=["수집일시", "매물묶음키", "_temp_name"], keep="first")
+    # subset에서 매물묶음키 대신 본질적 스펙과 중개사명만 지정하여 멀티 CP 도배를 1건으로 압축
+    df = df.drop_duplicates(subset=["수집일시", "동/호수", "층/타입", "거래방식", "_temp_name"], keep="first")
     df = df.drop(columns=["_temp_name"])
     print(f"[DONE] process_data ({time.time() - start_t:.2f}s)")
     return df
