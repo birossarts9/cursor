@@ -44,23 +44,30 @@ from data_fetcher import clean_realtor_name, process_data  # noqa: E402
 
 
 TARGET_FILES = [
-    "naver_market_report_2026_04.parquet",
     "naver_market_report_2026_05.parquet",
 ]
 
 CLUSTER_GROUP_ORDER = ["소규모 (1~3)", "중규모 (4~10)", "대규모 (11+)"]
+CLUSTER_LABEL_MAP = {
+    "소규모 (1~3)": "소규모 단지",
+    "중규모 (4~10)": "중규모 단지",
+    "대규모 (11+)": "대규모 단지",
+}
 POSITION_ORDER = ["First", "Middle", "Last"]
 TIER_ORDER = ["Top 1%", "Top 1~10%", "Top 10~30%", "기타(하위권)"]
 RANK_DROPOUT = 999
-TOP3_WINDOW_START_H = 12
-TOP3_WINDOW_END_H = 24
 MAX_OBS_INTERVAL_MIN = 60.0
+H2_OBS_WINDOW_HOURS = 24  # 시간대 분포 진단용
+H2_CRAWLER_BREAK_MIN = 120.0  # 갱신 후 연속 구간: 수집 간격 > 2h → 로그 단절·정전
+H2_OUTPUT_CSV = "hypothesis_2_last_mover.csv"
+H2_OUTPUT_COLUMNS = ["규모", "순서", "표본_수", "평균_순수_상위권_유지_시간(시간)"]
 
 
 @dataclass(frozen=True)
-class WindowMetric:
+class Survival24hMetric:
     top3_minutes: float
-    defense_rate: float
+    corrected_win_minutes: float
+    survival_hours: float
     has_observation: bool
 
 
@@ -69,7 +76,7 @@ def load_target_parquets(
     max_rows: int | None = None,
 ) -> pd.DataFrame | None:
     """
-    지정된 4월·5월 parquet을 직접 로드한다.
+    지정된 5월 단독 parquet을 직접 로드한다.
 
     기존 로직처럼 concat 후 중복 제거와 수집일시 파싱을 수행하되,
     tqdm 진행률과 디버깅용 max_rows 옵션을 제공한다.
@@ -146,7 +153,8 @@ def _classify_renewal_position(events: pd.DataFrame) -> pd.Series:
         return pd.Series(dtype="object")
 
     work = events[["_event_id", "_cluster_code", "수집일시"]].copy()
-    work["renewal_date"] = work["수집일시"].dt.floor("D")
+    # 비즈니스 데이: 04:00 전 수집은 전날 야간 연속으로 귀속 (자정 크롤 주기 분리 방지)
+    work["renewal_date"] = (work["수집일시"] - pd.Timedelta(hours=4)).dt.floor("D")
     work = work.sort_values(["_cluster_code", "renewal_date", "수집일시", "_event_id"])
 
     g = work.groupby(["_cluster_code", "renewal_date"], sort=False, observed=True)
@@ -154,7 +162,7 @@ def _classify_renewal_position(events: pd.DataFrame) -> pd.Series:
     order = g.cumcount()
 
     position = np.full(len(work), None, dtype=object)
-    multi = size >= 2
+    multi = size >= 5
     position[multi & (order == 0)] = "First"
     position[multi & (order == size - 1)] = "Last"
     position[multi & (order > 0) & (order < size - 1)] = "Middle"
@@ -334,85 +342,220 @@ def _build_observation_index(df: pd.DataFrame) -> dict[int, tuple[np.ndarray, np
     return index
 
 
-def _window_metric_for_event(
+def _survival_24h_metric_for_event(
     times: np.ndarray,
     ranks: np.ndarray,
     event_time: pd.Timestamp,
-    start_h: int = TOP3_WINDOW_START_H,
-    end_h: int = TOP3_WINDOW_END_H,
-) -> WindowMetric:
-    start = np.datetime64(event_time + pd.Timedelta(hours=start_h), "ns")
-    end = np.datetime64(event_time + pd.Timedelta(hours=end_h), "ns")
-    window_minutes = float((end - start) / np.timedelta64(1, "m"))
+) -> Survival24hMetric:
+    """
+    갱신 직후(t0)부터 TOP3 최초 이탈 또는 수집 로그 단절(>120분) 전까지의
+    순수 연속 유지 시간만 합산. 과거 시점·24h 고정 창 혼입 없음.
+    """
+    t0 = pd.Timestamp(event_time)
+    t0_ns = np.datetime64(t0, "ns")
 
-    left = int(np.searchsorted(times, start, side="left"))
-    right = int(np.searchsorted(times, end, side="right"))
-    if right <= left:
-        return WindowMetric(0.0, 0.0, False)
+    if len(times) == 0:
+        return Survival24hMetric(0.0, 0.0, np.nan, False)
 
-    t = times[left:right]
-    r = ranks[left:right]
-    next_t = np.empty_like(t)
-    if len(t) > 1:
-        next_t[:-1] = t[1:]
-    next_t[-1] = end
+    start_idx = int(np.searchsorted(times, t0_ns, side="left"))
+    if start_idx >= len(times):
+        return Survival24hMetric(0.0, 0.0, np.nan, False)
 
-    duration = (np.minimum(next_t, end) - t) / np.timedelta64(1, "m")
-    duration = np.clip(duration.astype(float), 0.0, MAX_OBS_INTERVAL_MIN)
-    top3_minutes = float(duration[r <= 3].sum())
-    defense_rate = (top3_minutes / window_minutes * 100.0) if window_minutes else np.nan
-    return WindowMetric(top3_minutes, defense_rate, True)
+    has_obs = True
+    top3_min = 0.0
+    win_min = 0.0
+
+    if int(ranks[start_idx]) > 3:
+        return Survival24hMetric(0.0, 0.0, 0.0, has_obs)
+
+    for idx in range(start_idx, len(times) - 1):
+        S = times[idx]
+        if int(ranks[idx]) > 3:
+            break
+
+        E = times[idx + 1]
+        gap_min = float((E - S) / np.timedelta64(1, "m"))
+        if gap_min > H2_CRAWLER_BREAK_MIN:
+            break
+
+        seg_start = max(S, t0_ns) if idx == start_idx else S
+        seg_end = E
+        if seg_end <= seg_start:
+            continue
+
+        dur_min = float((seg_end - seg_start) / np.timedelta64(1, "m"))
+        if dur_min <= 0:
+            continue
+
+        top3_min += dur_min
+        win_min += dur_min
+
+    if win_min <= 0:
+        return Survival24hMetric(top3_min, win_min, np.nan, has_obs)
+
+    survival_h = round(top3_min / 60.0, 1)
+    return Survival24hMetric(top3_min, win_min, survival_h, has_obs)
 
 
-def _append_12_24h_window_metrics(df: pd.DataFrame, events: pd.DataFrame) -> pd.DataFrame:
+def _append_24h_survival_metrics(df: pd.DataFrame, events: pd.DataFrame) -> pd.DataFrame:
     if events.empty:
-        events["top3_minutes_12_24h"] = []
-        events["defense_rate_12_24h"] = []
-        events["has_12_24h_observation"] = []
+        events = events.copy()
+        events["survival_hours_24h"] = []
+        events["has_24h_observation"] = []
         return events
 
     obs_index = _build_observation_index(df)
-    top3_minutes: list[float] = []
-    defense_rates: list[float] = []
+
+    survival_hours: list[float] = []
     has_observation: list[bool] = []
 
     iterator = events[["_track_key", "수집일시"]].itertuples(index=False, name=None)
-    for track_key, event_time in tqdm(iterator, total=len(events), desc="12~24h 방어율", unit="event"):
-        times, ranks = obs_index.get(int(track_key), (np.array([], dtype="datetime64[ns]"), np.array([], dtype=np.int16)))
-        metric = _window_metric_for_event(times, ranks, pd.Timestamp(event_time))
-        top3_minutes.append(metric.top3_minutes)
-        defense_rates.append(metric.defense_rate)
+    for track_key, event_time in tqdm(
+        iterator, total=len(events), desc="24h 생존시간 연산", unit="event"
+    ):
+        times, ranks = obs_index.get(
+            int(track_key),
+            (np.array([], dtype="datetime64[ns]"), np.array([], dtype=np.int16)),
+        )
+        metric = _survival_24h_metric_for_event(
+            times, ranks, pd.Timestamp(event_time)
+        )
+        survival_hours.append(metric.survival_hours)
         has_observation.append(metric.has_observation)
 
     events = events.copy()
-    events["top3_minutes_12_24h"] = top3_minutes
-    events["defense_rate_12_24h"] = defense_rates
-    events["has_12_24h_observation"] = has_observation
+    events["survival_hours_24h"] = survival_hours
+    events["has_24h_observation"] = has_observation
     return events
 
 
-def prove_hypothesis_2_last_mover(df: pd.DataFrame) -> pd.DataFrame:
-    print("\n[가설 2] 갱신 순서에 따른 Last Mover Advantage")
+def _prepare_hypothesis_2_events(df: pd.DataFrame) -> pd.DataFrame:
+    """가설 2: 갱신 포지션이 있는 이벤트 + 24h 생존 지표 부착."""
     events = _events(df)
     events = events[events["renewal_position"].notna()].copy()
     if events.empty:
-        return pd.DataFrame()
+        return events
+    return _append_24h_survival_metrics(df, events)
 
-    events = _append_12_24h_window_metrics(df, events)
+
+def _top3_snapshot_hours_in_24h_window(
+    times: np.ndarray,
+    ranks: np.ndarray,
+    event_time: pd.Timestamp,
+) -> list[int]:
+    """[t0, t0+24h] 내 ranks<=3 인 수집 시각의 시(0~23) 목록."""
+    if len(times) == 0:
+        return []
+    t0_ns = np.datetime64(pd.Timestamp(event_time), "ns")
+    t1_ns = t0_ns + np.timedelta64(H2_OBS_WINDOW_HOURS, "h")
+    left = int(np.searchsorted(times, t0_ns, side="left"))
+    right = int(np.searchsorted(times, t1_ns, side="right"))
+    if right <= left:
+        return []
+    seg_times = times[left:right]
+    seg_ranks = ranks[left:right]
+    top3_mask = seg_ranks <= 3
+    if not np.any(top3_mask):
+        return []
+    return [int(pd.Timestamp(t).hour) for t in seg_times[top3_mask]]
+
+
+def print_hourly_exposure_distribution(df: pd.DataFrame, events: pd.DataFrame) -> None:
+    """
+    First / Last 갱신 매물의 24h 창 내 TOP3 노출 스냅샷 시각 분포(0~23시).
+    가설 2 유효 관측 이벤트(events) 기준.
+    """
+    print(f"\n{'=' * 88}")
+    print("[진단] First vs Last · 24h TOP3 노출 시간대 분포 (스냅샷 횟수)")
+    print("=" * 88)
+
+    if events is None or events.empty:
+        print("  유효 이벤트 없음")
+        return
+
+    work = events.loc[events["renewal_position"].isin(["First", "Last"])].copy()
+    if "has_24h_observation" in work.columns:
+        work = work[work["has_24h_observation"]].copy()
+    if "survival_hours_24h" in work.columns:
+        work = work[work["survival_hours_24h"].notna()].copy()
+
+    if work.empty:
+        print("  First/Last 유효 관측 없음")
+        return
+
+    obs_index = _build_observation_index(df)
+    hour_rows: list[dict[str, object]] = []
+
+    iterator = zip(
+        work["_track_key"].astype(int),
+        work["수집일시"],
+        work["renewal_position"].astype(str),
+    )
+    for track_key, event_time_raw, position in tqdm(
+        iterator, total=len(work), desc="TOP3 시간대 집계", unit="event"
+    ):
+        event_time = pd.Timestamp(event_time_raw)
+        times, ranks = obs_index.get(
+            track_key,
+            (np.array([], dtype="datetime64[ns]"), np.array([], dtype=np.int16)),
+        )
+        for hour in _top3_snapshot_hours_in_24h_window(times, ranks, event_time):
+            hour_rows.append({"순서": position, "hour": hour})
+
+    if not hour_rows:
+        print("  TOP3 스냅샷 없음")
+        return
+
+    hour_df = pd.DataFrame(hour_rows)
+    pivot = (
+        hour_df.groupby(["순서", "hour"], observed=True)
+        .size()
+        .unstack(fill_value=0)
+    )
+    pivot = pivot.reindex(index=["First", "Last"], columns=range(24), fill_value=0)
+    pivot.columns = [f"{h:02d}시" for h in pivot.columns]
+    pivot.index.name = "순서"
+
+    total_first = int(pivot.loc["First"].sum()) if "First" in pivot.index else 0
+    total_last = int(pivot.loc["Last"].sum()) if "Last" in pivot.index else 0
+    print(f"  TOP3 스냅샷 합계 — First: {total_first:,}회 | Last: {total_last:,}회")
+    print(f"  (이벤트 {len(work):,}건 · 갱신 후 24h 창 내 ranks≤3 수집 시각 기준)\n")
+    print(pivot.to_string())
+
+
+def prove_hypothesis_2_last_mover(
+    df: pd.DataFrame,
+    events: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    print("\n[가설 2] 갱신 직후 순수 연속 TOP3 유지 시간 (Last Mover)")
+    if events is None:
+        events = _prepare_hypothesis_2_events(df)
+    else:
+        events = events.loc[events["renewal_position"].notna()].copy()
+    if events.empty:
+        return pd.DataFrame(columns=H2_OUTPUT_COLUMNS)
+    valid = events[events["has_24h_observation"] & events["survival_hours_24h"].notna()]
+    if valid.empty:
+        return pd.DataFrame(columns=H2_OUTPUT_COLUMNS)
+
     result = (
-        events.groupby(["cluster_size_group", "renewal_position"], observed=True)
+        valid.groupby(["cluster_size_group", "renewal_position"], observed=True)
         .agg(
-            관측건수=("_event_id", "size"),
-            평균_TOP3_유지_분=("top3_minutes_12_24h", "mean"),
-            평균_순위방어율_pct=("defense_rate_12_24h", "mean"),
-            추적관측률_pct=("has_12_24h_observation", lambda s: float(s.mean() * 100)),
+            표본_수=("_event_id", "size"),
+            평균_순수_상위권_유지_시간_시간=("survival_hours_24h", "mean"),
         )
         .reset_index()
-        .rename(columns={"cluster_size_group": "규모", "renewal_position": "갱신순서"})
+        .rename(
+            columns={
+                "cluster_size_group": "규모",
+                "renewal_position": "순서",
+                "평균_순수_상위권_유지_시간_시간": "평균_순수_상위권_유지_시간(시간)",
+            }
+        )
     )
-    return result.round(
-        {"평균_TOP3_유지_분": 1, "평균_순위방어율_pct": 2, "추적관측률_pct": 2}
-    )
+    result["규모"] = result["규모"].astype(str).map(CLUSTER_LABEL_MAP).fillna(result["규모"])
+    result["평균_순수_상위권_유지_시간(시간)"] = result["평균_순수_상위권_유지_시간(시간)"].round(1)
+    return result[H2_OUTPUT_COLUMNS]
 
 
 def _assign_realtor_tiers(top3_minutes: pd.Series) -> pd.Series:
@@ -505,12 +648,12 @@ def _print_table(title: str, df: pd.DataFrame) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="4월·5월 네이버 부동산 parquet 전수 분석으로 3대 비즈니스 가설을 검증합니다."
+        description="5월 단독 네이버 부동산 parquet 전수 분석으로 3대 비즈니스 가설을 검증합니다."
     )
     parser.add_argument(
         "--data-dir",
         default=_BASE_DIR,
-        help="naver_market_report_2026_04.parquet / 05.parquet 파일이 있는 폴더",
+        help="naver_market_report_2026_05.parquet 파일이 있는 폴더",
     )
     parser.add_argument(
         "--max-rows",
@@ -539,12 +682,19 @@ def main() -> int:
     gc.collect()
 
     h1 = prove_hypothesis_1_indexing_time(df)
-    h2 = prove_hypothesis_2_last_mover(df)
+    h2_events = _prepare_hypothesis_2_events(df)
+    h2 = prove_hypothesis_2_last_mover(df, events=h2_events)
+    print_hourly_exposure_distribution(df, h2_events)
     h3 = prove_hypothesis_3_top_tier_patterns(df)
 
     _print_table("[가설 1] 규모별 갱신 효과 및 인덱싱 소요 시간", h1)
-    _print_table("[가설 2] 규모별 First vs Middle vs Last 방어율", h2)
+    _print_table("[가설 2] 규모별 First vs Middle vs Last · 순수 연속 TOP3 유지 시간", h2)
     _print_table("[가설 3] 규모·티어별 장기 상위권 부동산 행동 패턴", h3)
+
+    if not h2.empty:
+        csv_path = os.path.join(os.path.abspath(args.data_dir), H2_OUTPUT_CSV)
+        h2.to_csv(csv_path, index=False, encoding="utf-8-sig")
+        print(f"\n[가설 2] CSV 저장: {csv_path}")
 
     print(f"\n총 소요 시간: {time.time() - total_t0:.2f}초")
     return 0

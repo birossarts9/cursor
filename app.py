@@ -1968,7 +1968,7 @@ def _precompute_all_complexes_data_impl(
             ms_df = pd.DataFrame(columns=["부동산명", "매물건수", "총점수"])
             comp_df = pd.DataFrame(columns=["부동산명", "총횟수", "갱신빈도"])
         else:
-            # --- [공식 통일] 탭 4: 시장 점유율 사전 계산 (AI 광고 효율 총점 % 기반)
+            # --- 탭 4: 시장 점유율 사전 계산 (상위권 가중치 합산)
             t_df_ms = t_df.copy()
             if "CP사" not in t_df_ms.columns:
                 t_df_ms["CP사"] = ""
@@ -1983,25 +1983,26 @@ def _precompute_all_complexes_data_impl(
                 errors="coerce",
             ).fillna(999)
 
-            ms_base = t_df_ms.groupby("부동산명_정제").agg(
-                매물건수=("매물묶음키", "nunique"),
-                전체노출건수=("매물묶음키", "count"),
+            # 상위권 가중치 절대 평가 (1위: 10점, 2위: 7점, 3위: 5점, 4위 이하: 1점)
+            t_df_ms["_가중점수"] = np.where(
+                t_df_ms["_순위정렬"] == 1,
+                10,
+                np.where(
+                    t_df_ms["_순위정렬"] == 2,
+                    7,
+                    np.where(t_df_ms["_순위정렬"] == 3, 5, 1),
+                ),
             )
-            top3_counts = (
-                t_df_ms[t_df_ms["_순위정렬"] <= 3]
-                .groupby("부동산명_정제")
-                .size()
-                .rename("상위노출건수")
-            )
-            ms_df = ms_base.join(top3_counts).fillna(0).reset_index()
 
-            ms_df["전체노출건수"] = ms_df["전체노출건수"].replace(0, np.nan)
-            ms_df["총점수"] = (
-                (ms_df["상위노출건수"] / ms_df["전체노출건수"]) * 100
-            ).fillna(0).round().astype(int)
+            ms_df = (
+                t_df_ms.groupby("부동산명_정제")
+                .agg(매물건수=("매물묶음키", "nunique"), 총점수=("_가중점수", "sum"))
+                .reset_index()
+            )
+
             ms_df = (
                 ms_df.rename(columns={"부동산명_정제": "부동산명"})
-                .sort_values("총점수", ascending=False)
+                .sort_values(["총점수", "매물건수"], ascending=[False, False])
             )
 
             _ts_all = pd.to_datetime(df_to_process["수집일시"], errors="coerce")
@@ -2984,7 +2985,8 @@ def main() -> None:
         with tab_ms:
             st.markdown("#### 🏆 단지 내 시장 점유율 (M/S) Top 10")
             st.caption(
-                "※ **AI 광고 효율 총점** = 해당 단지의 전체 노출 시간 중 내 매물이 상위권(1~3위)을 방어해 낸 비율(%)"
+                "※ **M/S 가중 점수** = 노출별 순위 가중치 합산 (1위 10점 · 2위 7점 · 3위 5점 · 4위 이하 1점). "
+                "매물 수가 적어도 상위권 노출이 많으면 점수가 올라갑니다."
             )
 
             c_m1, c_m2 = st.columns([1, 1.2])
@@ -3005,11 +3007,11 @@ def main() -> None:
                         )
                     )
                 )
-                top10_ms = ms_df.sort_values("총점수", ascending=False).head(10)
+                top10_ms = ms_df.head(10)
 
                 with c_m1:
                     disp_df = top10_ms[["부동산명_축약", "매물건수", "총점수"]].rename(
-                        columns={"총점수": "AI 광고 효율 총점"}
+                        columns={"총점수": "M/S 가중 점수"}
                     )
                     st.dataframe(
                         disp_df,
@@ -3085,35 +3087,42 @@ def main() -> None:
             )
 
             df_h2_plot = pd.DataFrame({
-                "단지 규모": ["소규모 단지", "소규모 단지", "중규모 단지", "중규모 단지", "대규모 단지", "대규모 단지"],
-                "갱신 타이밍": ["일반 경쟁 시간대", "탑랭크 AI 추천 타이밍"] * 3,
-                "순위 방어율(%)": [17.8, 60.4, 49.2, 73.1, 43.8, 63.9]
+                "단지 규모": [
+                    "소규모 단지", "소규모 단지",
+                    "중규모 단지", "중규모 단지",
+                    "대규모 단지", "대규모 단지",
+                ],
+                "갱신 타이밍": ["과열 경쟁 그룹", "마지막 광고 그룹"] * 3,
+                "평균 순수 상위권 유지 시간": [0.5, 1.8, 1.4, 3.8, 1.4, 4.1],
             })
             fig_h2 = px.bar(
-                df_h2_plot, 
-                x="단지 규모", 
-                y="순위 방어율(%)", 
-                color="갱신 타이밍", 
+                df_h2_plot,
+                x="단지 규모",
+                y="평균 순수 상위권 유지 시간",
+                color="갱신 타이밍",
                 barmode="group",
-                text="순위 방어율(%)",
-                color_discrete_sequence=["#94A3B8", "#10B981"]
+                text="평균 순수 상위권 유지 시간",
+                color_discrete_sequence=["#94A3B8", "#10B981"],
+                category_orders={
+                    "갱신 타이밍": ["과열 경쟁 그룹", "마지막 광고 그룹"],
+                },
             )
-            fig_h2.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
+            fig_h2.update_traces(texttemplate="%{text:.1f}시간", textposition="outside")
             fig_h2.update_layout(
-                height=260, 
+                height=260,
                 margin=dict(t=20, b=10, l=10, r=10),
-                yaxis_range=[0, 100],
+                yaxis_range=[0, 6],
                 plot_bgcolor="rgba(0,0,0,0)",
                 xaxis_title="",
-                yaxis_title="방어율 (%)",
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                yaxis_title="평균 순수 상위권 유지 시간",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
             )
 
             # 2. [상단 레이어] 가설 1, 2 텍스트 배치
             col_txt1, col_txt2 = st.columns(2)
             
             with col_txt1:
-                st.markdown("#### 1️⃣ 가설 1. 광고 갱신과 상위 노출의 인과관계")
+                st.markdown("### 1️⃣ 광고 갱신과 상위 노출의 인과관계")
                 st.markdown(
                     "**“광고 갱신은 상위권(1~3위)에 진입하기 위한 가장 확실한 열쇠입니다.”**<br><br>"
                     "실제 분석 결과, 단지 규모에 관계없이 광고 갱신 시 **75.9% ~ 80.3%**라는 압도적인 도달률로 상위권 노출에 성공했습니다.<br>"
@@ -3122,13 +3131,14 @@ def main() -> None:
                 )
 
             with col_txt2:
-                st.markdown("#### 2️⃣ 가설 2. 최적의 갱신 타이밍 (Last Mover 효과)")
-                st.markdown(
-                    "**“가장 마지막에 광고한 집단이 경쟁이 치열한 시간대 대비 방어율이 최대 43%p 높았습니다.”**<br><br>"
-                    "타 중개업소들이 너도나도 광고를 몰아치는 혼잡 시간대(일반 경쟁 시간대)의 순위 방어율은 **17.8%~49.2%**에 불과했습니다.<br>"
-                    "반면, 경쟁사들의 세팅이 모두 끝난 직후 빈집을 노린 집단은 방어율이 **60.4%~73.1%**로 치솟으며 오랜 시간 상위권을 안정적으로 독점했습니다.",
-                    unsafe_allow_html=True
-                )
+                st.markdown("### 2️⃣ 광고 갱신 타이밍의 중요성")
+                st.markdown("""
+경쟁이 몰리는 시간대에 광고하는 그룹은 상위권에 올랐다가 약 0.5\~1.4시간동안만에 자리를 빼앗겼습니다.
+
+반면 가장 마지막에 광고를 갱신한 그룹은 1.8\~4.1시간으로 경쟁 과열 시간대에 비해 3\~4배 이상 유지되었습니다.
+
+이 유지 시간은 이용자가 거의 없는 새벽 시간대 (00:00\~07:59)를 제외한 시간입니다.
+""")
 
             st.write("") # 간격 조정
 
