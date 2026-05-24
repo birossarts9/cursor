@@ -1,4 +1,3 @@
-import json
 import os
 import re
 import time
@@ -12,7 +11,8 @@ _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = _BASE_DIR  # "data" 폴더 지정을 빼고 최상위 폴더로 바로 연결
 import pandas as pd
 import streamlit as st
-from oauth2client.service_account import ServiceAccountCredentials
+
+_SERVICE_ACCOUNT_KEY_PATH = os.path.join(_BASE_DIR, "service_account_key.json")
 
 
 def _sterilize_text(val):
@@ -73,29 +73,57 @@ def _parse_floor_type(s):
 
 @st.cache_resource(show_spinner=False)
 def get_gspread_client():
-    scope = [
-        "https://spreadsheets.google.com/feeds",
-        "https://www.googleapis.com/auth/drive",
-    ]
-    creds_dict = st.secrets["gcp_service_account"]
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-    return gspread.authorize(creds)
+    """프로젝트 루트의 service_account_key.json으로 gspread 인증."""
+    return gspread.service_account(filename=_SERVICE_ACCOUNT_KEY_PATH)
 
 
 def load_realtor_map():
-    path = os.path.join(_BASE_DIR, "realtors.json")
-    if os.path.isfile(path):
-        with open(path, "r", encoding="utf-8") as f:
-            try:
-                return json.load(f)
-            except Exception:
-                pass
-    return {
-        "demo": {
-            "name": "체험용 부동산",
-            "complexes": ["다산e편한세상자이", "힐스테이트다산", "다산한양수자인리버팰리스"],
+    """구글 스프레드시트의 '회원명부' 탭에서 실시간 회원 리스트, 만료일, 단지 권한을 로드합니다."""
+    try:
+        client = get_gspread_client()
+        # 기존 사용 중인 스프레드시트 마스터 ID 고정
+        sheet_id = "1yEllJWWNwsd5FMvvgwSIvA46j10XU_8MxpRAWcs-ba8"
+        doc = client.open_by_key(sheet_id)
+
+        # '회원명부' 워크시트 로드
+        worksheet = doc.worksheet("회원명부")
+        records = worksheet.get_all_records()
+
+        realtor_map = {}
+        for row in records:
+            # 필수 컬럼 검증 및 전처리
+            cid = str(row.get("고객ID", "")).strip()
+            if not cid:
+                continue
+
+            # 단지리스트를 콤마 기준으로 분리하여 배열화
+            raw_complexes = str(row.get("단지리스트", "")).strip()
+            complex_list = [c.strip() for c in raw_complexes.split(",") if c.strip()] if raw_complexes else []
+
+            realtor_map[cid] = {
+                "name": str(row.get("부동산명", "테스트 부동산")).strip(),
+                "complexes": complex_list,
+                "expire_date": str(row.get("만료일", "2026-01-01")).strip(),
+            }
+
+        # 기본 데모 계정 방어막 유지
+        if "demo" not in realtor_map:
+            realtor_map["demo"] = {
+                "name": "체험용 부동산",
+                "complexes": ["사랑동행복단지"],
+                "expire_date": "2029-12-31",
+            }
+        return realtor_map
+    except Exception as e:
+        print(f"[ERROR] 구글 시트 회원명부 로드 실패: {e}")
+        # 실패 시 시스템이 다운되지 않도록 최소한의 안전 데모 마스터 반환
+        return {
+            "demo": {
+                "name": "체험용 부동산",
+                "complexes": ["사랑동행복단지"],
+                "expire_date": "2029-12-31",
+            }
         }
-    }
 
 
 @st.cache_data(ttl=600, max_entries=1, show_spinner=False)

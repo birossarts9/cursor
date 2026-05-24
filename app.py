@@ -2362,18 +2362,46 @@ def main() -> None:
         end_dt = pd.to_datetime(e_d) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
 
     else:
-        # 기존 일반(유료/체험단) 실시간 접속 로직
+        # 구글 시트 기반 실시간 회원 매핑 정보 로드
         REALTOR_MAP = load_realtor_map()
-        if user_id not in REALTOR_MAP:
-            user_id = "default"
-        IS_DEMO_MODE = False
+        
+        # URL 파라미터가 없거나 구글 시트에 등록되지 않은 ID인 경우 데모 모드로 안전하게 강제 전환
+        if (not user_id) or (user_id not in REALTOR_MAP):
+            user_id = "demo"
+            
+        IS_DEMO_MODE = (user_id == "demo")
         current_realtor = REALTOR_MAP.get(user_id, {})
+        
         if isinstance(current_realtor, dict):
             filter_realtor_name = current_realtor.get("name", "테스트 부동산")
             target_complexes = current_realtor.get("complexes", [])
+            expire_date_str = current_realtor.get("expire_date", "2026-01-01")
         else:
             filter_realtor_name = str(current_realtor)
             target_complexes = []
+            expire_date_str = "2026-01-01"
+
+        # [보안 고도화] 만료일자 계산 및 사이드바 강제 차단 락(Lock) 엔진
+        try:
+            expire_date = pd.to_datetime(expire_date_str).date()
+        except Exception:
+            expire_date = datetime(2026, 1, 1).date()
+            
+        KST = timezone(timedelta(hours=9))
+        today_kst_check = datetime.now(KST).date()
+        days_left = (expire_date - today_kst_check).days
+
+        # 사이드바 최상단에 안전하게 기간 배지 렌더링
+        with st.sidebar:
+            st.markdown("### 🔐 탑랭크 계정 정보")
+            st.caption(f"**상호명:** {filter_realtor_name}")
+            if days_left > 3:
+                st.success(f"🗓️ 사용 기간 남음\n\n**만료일:** {expire_date} ({days_left}일 남음)")
+            elif 0 <= days_left <= 3:
+                st.warning(f"🚨 만료 임박 경고\n\n**만료일:** {expire_date} ({days_left}일 후 종료!)\n\n하단 연장 안내를 확인해 주세요.")
+            else:
+                st.error(f"🛑 이용 기간 만료\n\n**종료일:** {expire_date}\n\n체험단 이용 기간이 만료되었습니다. 서비스를 연장하려면 월 결제가 필요합니다.")
+                st.stop()  # 만료 유저 대시보드 화면 연산 원천 차단
 
         display_realtor = filter_realtor_name
         raw_df = load_server_data()
@@ -2703,7 +2731,7 @@ def main() -> None:
                 height=_score_trend_chart_h,  # 좌측 박스와 완벽하게 일치
                 hovermode="x unified",
             )
-            st.plotly_chart(fig_spark, use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(fig_spark, width="stretch", config={"displayModeBar": False})
 
         with tab_timeline:
             _tl_sort_mode = _render_tracking_tab_header(
@@ -3015,7 +3043,7 @@ def main() -> None:
                     )
                     st.dataframe(
                         disp_df,
-                        use_container_width=True,
+                        width="stretch",
                         hide_index=True,
                     )
                 with c_m2:
@@ -3055,7 +3083,7 @@ def main() -> None:
                         yaxis_title="",
                         plot_bgcolor="rgba(0,0,0,0)",
                     )
-                    st.plotly_chart(fig_ms, use_container_width=True, config={"displayModeBar": False})
+                    st.plotly_chart(fig_ms, width="stretch", config={"displayModeBar": False})
             else:
                 st.info("점유율 데이터가 없습니다.")
 
@@ -3133,11 +3161,11 @@ def main() -> None:
             with col_txt2:
                 st.markdown("### 2️⃣ 광고 갱신 타이밍의 중요성")
                 st.markdown("""
-경쟁이 몰리는 시간대에 광고하는 그룹은 상위권에 올랐다가 약 0.5\~1.4시간동안만에 자리를 빼앗겼습니다.
+경쟁이 몰리는 시간대에 광고하는 그룹은 상위권에 올랐다가 약 0.5~1.4시간동안만에 자리를 빼앗겼습니다.
 
-반면 가장 마지막에 광고를 갱신한 그룹은 1.8\~4.1시간으로 경쟁 과열 시간대에 비해 3\~4배 이상 유지되었습니다.
+반면 가장 마지막에 광고를 갱신한 그룹은 1.8~4.1시간으로 경쟁 과열 시간대에 비해 3~4배 이상 유지되었습니다.
 
-이 유지 시간은 이용자가 거의 없는 새벽 시간대 (00:00\~07:59)를 제외한 시간입니다.
+이 유지 시간은 이용자가 거의 없는 새벽 시간대 (00:00~07:59)를 제외한 시간입니다.
 """)
 
             st.write("") # 간격 조정
@@ -3145,9 +3173,9 @@ def main() -> None:
             # 3. [중단 레이어] 차트 전용 행 구성 (칼정렬)
             col_graph1, col_graph2 = st.columns(2)
             with col_graph1:
-                st.plotly_chart(fig_h1, use_container_width=True, config={"displayModeBar": False})
+                st.plotly_chart(fig_h1, width="stretch", config={"displayModeBar": False})
             with col_graph2:
-                st.plotly_chart(fig_h2, use_container_width=True, config={"displayModeBar": False})
+                st.plotly_chart(fig_h2, width="stretch", config={"displayModeBar": False})
 
             st.write("")
             st.divider()
