@@ -18,8 +18,6 @@ if getattr(sys, 'frozen', False):
 else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-SWEEP_MEMORY_FILE = os.path.join(BASE_DIR, "my_sweep_list.json")
-VIP_MEMORY_FILE = os.path.join(BASE_DIR, "my_vip_list.json")
 NAVER_FIN_ARTICLE_LIST_API = "https://fin.land.naver.com/front-api/v1/complex/article/list"
 TARGET_ANALYZE = 100
 OPERATING_START_HOUR = 8
@@ -95,14 +93,25 @@ def load_control_room():
         print(f"🚨 통제실 로드 실패: {e}")
         return {}
 
-def append_to_sheet(sheet_name, data_row):
-    """탭 이름을 명시하여 데이터 기록 (순위로그, 작업지시서 등)"""
+def load_market_crawler_complexes():
+    """[market crawler] 탭을 읽어와서 분석 대상 단지 목록을 리스트로 반환.
+    반환 형식: [{"id": "113409", "name": "다산자이"}, ...]"""
     try:
         client = get_gspread_client()
-        sheet = client.open_by_key("1yEllJWWNwsd5FMvvgwSIvA46j10XU_8MxpRAWcs-ba8").worksheet(sheet_name)
-        sheet.append_row(data_row, value_input_option='USER_ENTERED')
+        sheet = client.open_by_key("1yEllJWWNwsd5FMvvgwSIvA46j10XU_8MxpRAWcs-ba8").worksheet("market crawler")
+        records = sheet.get_all_records()
+
+        complexes = []
+        for row in records:
+            # 헤더가 '단지 번호(ID)' 또는 '단지번호' 둘 다 커버
+            c_id = str(row.get('단지 번호(ID)', '') or row.get('단지번호', '') or row.get('단지 번호', '')).strip()
+            c_name = str(row.get('단지명', '')).strip()
+            if c_id:
+                complexes.append({"id": c_id, "name": c_name})
+        return complexes
     except Exception as e:
-        print(f"❌ 구글 시트 전송 오류 ({sheet_name}): {e}")
+        print(f"🚨 market crawler 단지 목록 로드 실패: {e}")
+        return []
 
 # PyQt5 플러그인 안전장치
 try:
@@ -362,7 +371,7 @@ class MarketSweepWorker:
         self.api_cookie_jar = http.cookiejar.CookieJar()
         self.api_opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(self.api_cookie_jar))
         self.api_session_ready = False
-        self.wait_seconds = 0.0
+        self.inter_complex_rest_seconds = 0.0  # 단지 간 휴식에서만 멈춘 순수 대기 시간
         
     def send_log(self, m): 
         self.sigs.log.emit(m)
@@ -371,10 +380,25 @@ class MarketSweepWorker:
         return self.stop_event.is_set()
 
     def sleep_or_stop(self, seconds):
-        started_at = time.monotonic()
-        stopped = self.stop_event.wait(seconds)
-        self.wait_seconds += time.monotonic() - started_at
-        return stopped
+        return self.stop_event.wait(seconds)
+
+    CYCLE_BUDGET_SEC = 3420  # 57분 (파케이·서버 전송 버퍼)
+    PER_COMPLEX_API_SEC = 15
+
+    def inter_complex_avg_wait_seconds(self):
+        """단지 간 평균 대기(초). 1시간 사이클 분배용 기준값(난수 제외)."""
+        n = len(self.c_list)
+        if n <= 1:
+            return 0.0
+        remaining = self.CYCLE_BUDGET_SEC - n * self.PER_COMPLEX_API_SEC
+        return remaining / (n - 1)
+
+    def get_inter_complex_wait_seconds(self):
+        """단지 간 실제 대기 시간(초). 평균 + 지터, 최소 15~25초 마진 적용."""
+        avg_wait = self.inter_complex_avg_wait_seconds()
+        if avg_wait < 15:
+            return max(avg_wait + random.uniform(-5, 5), random.uniform(15, 25))
+        return avg_wait + random.uniform(-5, 5)
 
     def build_article_payload(self, complex_number, last_info):
         return {
@@ -492,16 +516,11 @@ class MarketSweepWorker:
         c_name = row["단지명"]
         agent_name = row["부동산명"]
         c_rank = int(row["전체순위"] or 0)
-        bundle_rank = int(row["묶음내순위"] or 1)
         title = row["동/호수"]
         price_val = row["가격"]
         floor_spec = row["층/타입"]
         trade_type = row["거래방식"]
         article_no = row["고유번호"]
-
-        if any(vip in agent_name for vip in self.vip_agents):
-            self.send_log(f"📊 [VIP 매물 수집] {agent_name} - {title} ({c_rank}위)")
-            append_to_sheet("순위로그", [now_dt, c_name, agent_name, c_rank, bundle_rank, title, price_val, floor_spec, article_no])
 
         current_spec_key = f"{c_name.strip()}|{title.strip()}|{floor_spec.strip()}|{trade_type.strip()}|{price_val.strip()}"
         fallback_floor_spec = strip_direction_from_floor_type(floor_spec)
@@ -534,7 +553,6 @@ class MarketSweepWorker:
 
         if is_cooldown_passed:
             self.send_log(f"🚨 [작업지시 발동] {title} 마지노선 이탈! (새 매물번호: {article_no})")
-            append_to_sheet("작업지시서", [now_dt, target_info['부동산명'], target_info['아이디'], target_info['비밀번호'], matched_spec_key, article_no, "대기"])
             self.control_map[matched_spec_key]['최근갱신일시'] = now_dt
         else:
             self.send_log(f"⏳ [대기] {title} 매물이 밀려났으나 아직 쿨타임 남음.")
@@ -591,7 +609,7 @@ class MarketSweepWorker:
             self.send_log("⚠️ 저장할 수집 데이터가 없습니다.")
             return
         if pd is None:
-            self.send_log("❌ pandas가 없어 엑셀/파케이 저장을 건너뜁니다.")
+            self.send_log("❌ pandas가 없어 파케이 저장을 건너뜁니다.")
             return
 
         df_new = pd.DataFrame(all_data)
@@ -601,72 +619,39 @@ class MarketSweepWorker:
         df_new = df_new[LEGACY_COL_ORDER].astype(str)
 
         month_str = datetime.datetime.now().strftime("%Y_%m")
-        target_filename = f"naver_market_report_{month_str}.xlsx"
         target_parquet_filename = f"naver_market_report_{month_str}.parquet"
-        fname = os.path.join(BASE_DIR, target_filename)
         parquet_fname = os.path.join(BASE_DIR, target_parquet_filename)
 
         max_retries = 5
         for attempt in range(max_retries):
             try:
-                if os.path.exists(fname):
-                    df_old = pd.read_excel(fname)
+                if os.path.exists(parquet_fname):
+                    df_old = pd.read_parquet(parquet_fname)
                     for col in LEGACY_COL_ORDER:
                         if col not in df_old.columns:
                             df_old[col] = ""
                     df_old = df_old[LEGACY_COL_ORDER].astype(str)
                     df_comb = pd.concat([df_old, df_new], ignore_index=True).drop_duplicates()
-                    
-                    # [안전장치] 엑셀 저장 권한 에러 처리
-                    try:
-                        df_comb.to_excel(fname, index=False)
-                    except PermissionError:
-                        counter = 1
-                        while True:
-                            alt_filename = f"naver_market_report_{month_str}({counter}).xlsx"
-                            alt_fname = os.path.join(BASE_DIR, alt_filename)
-                            try:
-                                df_comb.to_excel(alt_fname, index=False)
-                                target_filename = alt_filename
-                                fname = alt_fname
-                                self.send_log(f"⚠️ 원본 엑셀이 열려 있어 새 이름으로 저장했습니다: {target_filename}")
-                                break
-                            except PermissionError:
-                                counter += 1
-                                if counter > 20: raise  # 무한루프 방지
-                                
                     df_comb.to_parquet(parquet_fname, index=False)
+                    total_rows = len(df_comb)
                 else:
-                    try:
-                        df_new.to_excel(fname, index=False)
-                    except PermissionError:
-                        counter = 1
-                        while True:
-                            alt_filename = f"naver_market_report_{month_str}({counter}).xlsx"
-                            alt_fname = os.path.join(BASE_DIR, alt_filename)
-                            try:
-                                df_new.to_excel(alt_fname, index=False)
-                                target_filename = alt_filename
-                                fname = alt_fname
-                                self.send_log(f"⚠️ 원본 엑셀이 열려 있어 새 이름으로 저장했습니다: {target_filename}")
-                                break
-                            except PermissionError:
-                                counter += 1
-                                if counter > 20: raise
                     df_new.to_parquet(parquet_fname, index=False)
+                    total_rows = len(df_new)
 
                 save_time_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                self.send_log(f"\n💾 [{save_time_str}] 수집 및 엑셀/파케이 저장 완료! (총 {len(df_new)}행)")
-                
-                self.send_log("⏳ 깃허브 서버로 데이터 자동 전송 중...")
-                auto_github_push(target_filename, self.send_log)
+                self.send_log(
+                    f"\n💾 [{save_time_str}] 파케이 저장 완료! "
+                    f"(신규 {len(df_new)}행 / 누적 {total_rows}행) → {target_parquet_filename}"
+                )
+
+                self.send_log("⏳ 깃허브 서버로 파케이 데이터 자동 전송 중...")
                 auto_github_push(target_parquet_filename, self.send_log)
-                
+
                 self.send_log("⏳ AWS Lightsail 서버로 파케이 데이터 전송 중...")
                 upload_to_aws(target_parquet_filename, self.send_log)
                 break
             except Exception as e:
-                self.send_log(f"   ⚠️ 엑셀/파케이 저장 실패 (재시도 {attempt+1}/{max_retries}) - 에러 원인: {e}")
+                self.send_log(f"   ⚠️ 파케이 저장 실패 (재시도 {attempt+1}/{max_retries}) - 에러 원인: {e}")
                 if self.sleep_or_stop(4.0):
                     break
 
@@ -677,6 +662,14 @@ class MarketSweepWorker:
         self.vip_agents = list(set([info['부동산명'] for info in self.control_map.values() if info['부동산명']]))
 
         self.send_log(f"🚀 [신버전 API 시장 분석] 스캔 시작 (감시 VIP: {', '.join(self.vip_agents)})")
+        n_complex = len(self.c_list)
+        if n_complex > 1:
+            avg_wait = self.inter_complex_avg_wait_seconds()
+            est_cycle_min = (n_complex * self.PER_COMPLEX_API_SEC + (n_complex - 1) * max(avg_wait, 15)) / 60
+            self.send_log(
+                f"⏱️ [1시간 분배] 단지 {n_complex}개 · 단지당 API ~{self.PER_COMPLEX_API_SEC}초 · "
+                f"단지 간 평균 대기 ~{avg_wait:.0f}초 (예상 사이클 ~{est_cycle_min:.0f}분)"
+            )
         all_data = []
 
         try:
@@ -706,34 +699,27 @@ class MarketSweepWorker:
                 if self.stop_requested():
                     break
 
-                processed = index + 1
-                if processed < len(self.c_list):
-                    rest_min = 1
-                    msg = "✅ 단지 분석 완료. 기본 1분 대기 중"
-                    if processed % 20 == 0:
-                        rest_min = 30
-                        msg = "🔥 [긴급] 20단지 도달! 30분 대규모 휴식 모드"
-                    elif processed % 10 == 0:
-                        rest_min = 10
-                        msg = "💤 [알림] 10단지 도달! 10분간 장비 쿨다운"
-                    elif processed % 3 == 0:
-                        rest_min = 5
-                        msg = "☕ [알림] 3단지 분석 완료! 5분간 중간 휴식"
-
-                    total_sleep = (rest_min * 60) + random.uniform(5, 15)
-                    self.send_log(f"  {msg}... ({total_sleep/60:.1f}분 후 다음 작업 시작)")
-                    if self.sleep_or_stop(total_sleep):
-                        self.send_log("🛑 단지 간 휴식 중 중지 요청 감지")
-                        break
+                if index + 1 < len(self.c_list):
+                    total_sleep = self.get_inter_complex_wait_seconds()
+                    if total_sleep > 0:
+                        self.send_log(f"  💤 단지 간 대기 {total_sleep:.0f}초 후 다음 단지...")
+                        rest_started_at = time.monotonic()
+                        stopped = self.sleep_or_stop(total_sleep)
+                        # 단지 간 휴식에서 실제로 멈춰있던 시간만 순수 대기로 별도 집계
+                        self.inter_complex_rest_seconds += time.monotonic() - rest_started_at
+                        if stopped:
+                            self.send_log("🛑 단지 간 휴식 중 중지 요청 감지")
+                            break
 
             self.save_market_rows(all_data)
         except Exception as e:
             self.send_log(f"❌ 전체 분석 오류: {e}")
         finally:
             total_elapsed = time.monotonic() - total_started_at
-            wait_elapsed = self.wait_seconds
+            # 순수 대기 = 단지 간 휴식에서 멈춘 시간만. 그 외(페이지 대기 포함 단지 스캔)는 실작업으로 집계
+            wait_elapsed = self.inter_complex_rest_seconds
             work_elapsed = max(0, total_elapsed - wait_elapsed)
-            self.send_log(f"⏱️ 전체 소요: {format_elapsed(total_elapsed)} (실작업 {format_elapsed(work_elapsed)} / 대기 {format_elapsed(wait_elapsed)})")
+            self.send_log(f"⏱️ 전체 소요: {format_elapsed(total_elapsed)} (실작업 {format_elapsed(work_elapsed)} / 단지간 휴식 {format_elapsed(wait_elapsed)})")
             self.sigs.finished.emit()
 
 # ======================================================
@@ -768,17 +754,13 @@ class MainWindow(QMainWindow):
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         comp_vbox.addWidget(self.table)
         comp_btn_lay = QHBoxLayout()
-        self.btn_add = QPushButton("단지 추가 (+)")
-        self.btn_add.clicked.connect(lambda: self.add_row(self.table, ["", ""]))
-        self.btn_del = QPushButton("단지 삭제 (-)")
-        self.btn_del.clicked.connect(lambda: self.table.removeRow(self.table.currentRow()))
-        comp_btn_lay.addWidget(self.btn_add); comp_btn_lay.addWidget(self.btn_del)
+        self.btn_reload = QPushButton("🔄 시트에서 목록 새로고침")
+        self.btn_reload.clicked.connect(self.load_list)
+        comp_btn_lay.addWidget(self.btn_reload)
         comp_vbox.addLayout(comp_btn_lay)
         tables_layout.addLayout(comp_vbox, 2)
 
         layout.addLayout(tables_layout)
-
-        self.load_list()
 
         # 🚨 스케줄러 UI
         opt_group = QGroupBox("크롤링 옵션")
@@ -817,6 +799,9 @@ class MainWindow(QMainWindow):
         self.is_active = False
         self.worker_stop_event = None
 
+        # 로그창 준비 후 구글 시트에서 단지 목록 로드
+        self.load_list()
+
     def on_cycle_mode_changed(self, text):
         if text == "한 번만":
             self.time_spin.setEnabled(False)
@@ -828,27 +813,14 @@ class MainWindow(QMainWindow):
         table_obj.insertRow(row)
         for i, val in enumerate(data_list): table_obj.setItem(row, i, QTableWidgetItem(str(val)))
 
-    def save_list(self):
-        comp_data = []
-        for i in range(self.table.rowCount()):
-            id_item = self.table.item(i, 0)
-            name_item = self.table.item(i, 1)
-            if id_item and id_item.text().strip():
-                comp_data.append({"id": id_item.text().strip(), "name": name_item.text().strip() if name_item else ""})
-        try:
-            with open(SWEEP_MEMORY_FILE, "w", encoding="utf-8") as f:
-                json.dump(comp_data, f, ensure_ascii=False, indent=4)
-        except: pass
-
     def load_list(self):
-        if os.path.exists(SWEEP_MEMORY_FILE):
-            try:
-                with open(SWEEP_MEMORY_FILE, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    for item in data: self.add_row(self.table, [item['id'], item['name']])
-            except: pass
-        else:
-            self.add_row(self.table, ["113409", "다산자이"])
+        """구글 시트 [market crawler] 탭에서 단지 목록을 불러와 테이블에 바인딩."""
+        self.log_view.append("📥 구글 시트(market crawler)에서 단지 목록을 불러오는 중...")
+        complexes = load_market_crawler_complexes()
+        self.table.setRowCount(0)
+        for item in complexes:
+            self.add_row(self.table, [item['id'], item['name']])
+        self.log_view.append(f"✅ 단지 {len(complexes)}개 로드 완료. (중앙 관리: 구글 시트)")
 
     def schedule_after_sleep_window(self):
         wait_seconds = seconds_until_operating_start()
@@ -880,7 +852,6 @@ class MainWindow(QMainWindow):
             self.setStyleSheet(self.styleSheet())
             self.log_view.append("\n🛑 중지 요청을 보냈습니다. 진행 중인 요청/대기 지점에서 곧 멈춥니다.")
         else:
-            self.save_list()
             if self.cycle_combo.currentText() == "한 번만":
                 self.is_active = True
                 self.cycle_combo.setEnabled(False)

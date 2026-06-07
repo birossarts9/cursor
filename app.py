@@ -897,6 +897,70 @@ def _build_target_status_for_task(
     if sub_df.empty:
         return target_status
 
+    def _freq_label_from_jump_events(br: pd.DataFrame, days_span: int) -> str:
+        if br.empty or "수집일시" not in br.columns:
+            return "💤 비정기적"
+        active_days = int(br["수집일시"].dt.normalize().nunique())
+        if active_days <= 0:
+            return "💤 비정기적"
+        ratio = days_span / active_days
+        if ratio <= 1.3:
+            return "🔥 매일 갱신"
+        if ratio <= 2.5:
+            return "⚡ 2일에 1번"
+        if ratio <= 4.0:
+            return "🚶 3~4일에 1번"
+        if ratio <= 8.0:
+            return "🐢 주 1~2회"
+        return "💤 비정기적"
+
+    def _round_last_ad_ts_30min(ts: pd.Timestamp) -> pd.Timestamp:
+        """가장 가까운 30분 단위로 반올림 (예: 09:52→10:00, 11:15→11:30, 13:01→13:00)."""
+        ts = pd.Timestamp(ts)
+        day_start = ts.normalize()
+        minute = int(ts.minute)
+        if minute < 15:
+            return day_start + pd.Timedelta(hours=ts.hour, minutes=0)
+        if minute < 45:
+            return day_start + pd.Timedelta(hours=ts.hour, minutes=30)
+        return day_start + pd.Timedelta(hours=ts.hour + 1, minutes=0)
+
+    def _format_last_ad_display(ts: pd.Timestamp | None, *, date_only: bool) -> str:
+        if ts is None or pd.isna(ts):
+            return ""
+        ts = pd.Timestamp(ts)
+        if date_only:
+            return ts.strftime("%m/%d")
+        ts = _round_last_ad_ts_30min(ts)
+        ad_date = ts.date()
+        if ad_date == kst_today:
+            return f"오늘 {ts.strftime('%H:%M')}"
+        if ad_date == kst_today - timedelta(days=1):
+            return f"어제 {ts.strftime('%H:%M')}"
+        return ts.strftime("%m/%d %H:%M")
+
+    def _confirm_date_from_sub(sub_r: pd.DataFrame) -> pd.Timestamp | None:
+        if sub_r.empty or "확인일자" not in sub_r.columns:
+            return None
+        conf = sub_r["확인일자"].dropna().astype(str).str.strip()
+        conf = conf[(conf != "") & (conf.str.lower() != "nan")]
+        if conf.empty:
+            return None
+        last_conf = conf.iloc[-1]
+        c_dt = pd.to_datetime(last_conf, format="%y.%m.%d", errors="coerce")
+        if pd.isna(c_dt):
+            c_dt = pd.to_datetime(last_conf, errors="coerce")
+        return pd.Timestamp(c_dt) if pd.notna(c_dt) else None
+
+    bundle_keys: list[str] = []
+    if "매물묶음키" in sub_df.columns:
+        bundle_keys = (
+            sub_df["매물묶음키"].dropna().astype(str).str.strip().replace("nan", "").unique().tolist()
+        )
+        bundle_keys = [k for k in bundle_keys if k]
+
+    analysis_days = 1
+    b_df_bundle = pd.DataFrame()
     b_df = complex_data.get("boosted")
     if b_df is not None and not b_df.empty:
         b_df = b_df.copy()
@@ -909,26 +973,44 @@ def _build_target_status_for_task(
             1,
             (b_freq["수집일시"].max().date() - b_freq["수집일시"].min().date()).days + 1,
         )
-        renew_counts = b_freq.groupby("부동산명_정제", dropna=False).size()
-        high_freq_unified = [r for r, cnt in renew_counts.items() if (analysis_days / cnt) <= 4.0]
+        if bundle_keys and "매물묶음키" in b_df.columns:
+            b_df_bundle = b_df[
+                b_df["매물묶음키"].astype(str).str.strip().isin(bundle_keys)
+            ].copy()
     else:
         today_renewed = []
-        high_freq_unified = []
 
     latest_ranks = sub_df.groupby("부동산명_통합")["묶음내순위_숫자"].last().reset_index()
     latest_ranks["묶음내순위_숫자"] = (
         pd.to_numeric(latest_ranks["묶음내순위_숫자"], errors="coerce").fillna(999)
     )
     top3_unified = latest_ranks[latest_ranks["묶음내순위_숫자"] <= 3]["부동산명_통합"].tolist()
-    sub_realtors = sub_df["부동산명_통합"].unique().tolist()
-    high_freq_unified = [r for r in high_freq_unified if r in sub_realtors]
+    top3_set = set(top3_unified)
+    _HIGH_FREQ_LABELS = frozenset({"🔥 매일 갱신", "⚡ 2일에 1번"})
 
-    for r_uni in set(top3_unified + high_freq_unified):
-        if r_uni == my_unified:
+    def _freq_for_realtor(r_uni: str) -> str:
+        b_sub = pd.DataFrame()
+        if not b_df_bundle.empty and "부동산명_정제" in b_df_bundle.columns:
+            b_sub = b_df_bundle[b_df_bundle["부동산명_정제"] == r_uni].copy()
+        return _freq_label_from_jump_events(b_sub, analysis_days)
+
+    def _list_priority(r: str) -> int:
+        if r in top3_set:
+            return 0
+        if _freq_for_realtor(r) in _HIGH_FREQ_LABELS:
+            return 1
+        return 2
+
+    all_realtors = sorted(
+        [r for r in sub_df["부동산명_통합"].dropna().unique() if r != my_unified],
+        key=lambda r: (_list_priority(r), str(r)),
+    )
+
+    for r_uni in all_realtors:
+        sub_r = sub_df[sub_df["부동산명_통합"] == r_uni]
+        if sub_r.empty:
             continue
-        r_original_series = sub_df[sub_df["부동산명_통합"] == r_uni]["부동산명"]
-        if r_original_series.empty:
-            continue
+        r_original_series = sub_r["부동산명"]
         r_original = r_original_series.iloc[-1]
         r_disp = mask_text(
             r_original,
@@ -937,15 +1019,45 @@ def _build_target_status_for_task(
             display_realtor=display_realtor,
         )
         r_disp_short = html.escape(_strip_realtor_label_noise(r_disp))
-        is_today = r_uni in today_renewed
-        last_active_hhmm = _last_renewal_hhmm_today(
-            r_uni, kst_today, b_df if b_df is not None else None, sub_df
+
+        b_df_bundle_realtor = pd.DataFrame()
+        if not b_df_bundle.empty and "부동산명_정제" in b_df_bundle.columns:
+            b_df_bundle_realtor = b_df_bundle[b_df_bundle["부동산명_정제"] == r_uni].copy()
+
+        freq_str = _freq_label_from_jump_events(b_df_bundle_realtor, analysis_days)
+
+        last_ad_label = ""
+        if not b_df_bundle_realtor.empty and "수집일시" in b_df_bundle_realtor.columns:
+            last_ad_ts = b_df_bundle_realtor["수집일시"].max()
+            last_ad_label = _format_last_ad_display(last_ad_ts, date_only=False)
+        else:
+            confirm_ts = _confirm_date_from_sub(sub_r)
+            last_ad_label = _format_last_ad_display(confirm_ts, date_only=True)
+
+        _recent_ad_line = (
+            f"<br><span style='color:#64748b;font-size:0.8rem;'>⏱️ 최근 광고: {html.escape(last_ad_label)}</span>"
+            if last_ad_label
+            else ""
         )
+
+        if not b_df_bundle_realtor.empty and "수집일시" in b_df_bundle_realtor.columns:
+            br_today = b_df_bundle_realtor["수집일시"].dt.date == kst_today
+            is_today = bool(br_today.any())
+            last_active_hhmm = (
+                pd.Timestamp(b_df_bundle_realtor.loc[br_today, "수집일시"].max()).strftime("%H:%M")
+                if is_today
+                else "--:--"
+            )
+        else:
+            is_today = r_uni in today_renewed
+            last_active_hhmm = _last_renewal_hhmm_today(
+                r_uni, kst_today, b_df if b_df is not None else None, sub_r
+            )
+
         peak_usual = "패턴 불규칙"
         peak_today_wd = "-"
         wd_group = ""
         deadline = 18
-        freq_str = "갱신 패턴 산출 전"
         weekday_real = True
         if not comp_df.empty and "부동산명" in comp_df.columns:
             comp_match = comp_df.copy()
@@ -953,10 +1065,6 @@ def _build_target_status_for_task(
             cm = comp_match.loc[comp_match["부동산명_통합"] == r_uni]
             if not cm.empty:
                 row0 = cm.iloc[0]
-                if "갱신빈도" in cm.columns:
-                    fv = row0.get("갱신빈도")
-                    if pd.notna(fv) and str(fv).strip():
-                        freq_str = str(fv)
                 if "주력 갱신 시간" in cm.columns and pd.notna(row0.get("주력 갱신 시간")):
                     peak_usual = str(row0["주력 갱신 시간"])
                 if "오늘 요일 주력 시간" in cm.columns and pd.notna(row0.get("오늘 요일 주력 시간")):
@@ -971,7 +1079,9 @@ def _build_target_status_for_task(
                 if "오늘요일_실측" in cm.columns:
                     _wr = row0.get("오늘요일_실측")
                     weekday_real = True if pd.isna(_wr) else bool(_wr)
+
         now_hour = kst_now.hour
+        is_genuine_threat = (r_uni in top3_set) or (freq_str in _HIGH_FREQ_LABELS)
         _bad_peak = ("-", "패턴 불규칙", "", "nan")
         peak_usual_n = str(peak_usual).strip()
         peak_today_n = str(peak_today_wd).strip()
@@ -997,6 +1107,7 @@ def _build_target_status_for_task(
                 f"<b>🟢 오늘 광고 완료 ({last_active_hhmm} 진행)</b>"
                 f"<br><span style='{_gray}'>{html.escape(pattern_desc)}</span>"
                 f"<br><span style='{_small}'>마지노선: {deadline}시</span>"
+                f"{_recent_ad_line}"
             )
             is_waiting = False
         elif now_hour < deadline:
@@ -1004,39 +1115,41 @@ def _build_target_status_for_task(
                 f"<b>🔴 아직 활동 전 (주의)</b>"
                 f"<br><span style='{_gray}'>{html.escape(pattern_desc)}</span>"
                 f"<br><span style='{_small}'>마지노선: {deadline}시 (이후 안전)</span>"
+                f"{_recent_ad_line}"
             )
-            is_waiting = True
+            is_waiting = is_genuine_threat
         else:
             state_html = (
                 f"<b><span style='color:#3B82F6;'>🔵 활동 없음 (마지노선 경과)</span></b>"
                 f"<br><span style='{_gray}'>{html.escape(pattern_desc)}</span>"
                 f"<br><span style='{_small}'>마지노선 {deadline}시 경과</span>"
+                f"{_recent_ad_line}"
             )
             is_waiting = False
-        if r_uni in top3_unified:
-            target_status[r_uni] = {
-                "display": r_disp,
-                "display_short": r_disp_short,
-                "freq": freq_str,
-                "icon": "👑",
-                "html": state_html,
-                "is_waiting": is_waiting,
-                "is_done_today": is_today,
-                "last_active_time": last_active_hhmm,
-                "type": "상위권 방어조",
-            }
+
+        list_priority = _list_priority(r_uni)
+        if r_uni in top3_set:
+            card_type = "상위권 방어조"
+            card_icon = "👑"
+        elif freq_str in _HIGH_FREQ_LABELS:
+            card_type = "고빈도 추격조"
+            card_icon = "🔥"
         else:
-            target_status[r_uni] = {
-                "display": r_disp,
-                "display_short": r_disp_short,
-                "freq": freq_str,
-                "icon": "🔥",
-                "html": state_html,
-                "is_waiting": is_waiting,
-                "is_done_today": is_today,
-                "last_active_time": last_active_hhmm,
-                "type": "고빈도 추격조",
-            }
+            card_type = "일반 경쟁사"
+            card_icon = "🏢"
+
+        target_status[r_uni] = {
+            "display": r_disp,
+            "display_short": r_disp_short,
+            "freq": freq_str,
+            "icon": card_icon,
+            "html": state_html,
+            "is_waiting": is_waiting,
+            "is_done_today": is_today,
+            "last_active_time": last_active_hhmm,
+            "type": card_type,
+            "list_priority": list_priority,
+        }
     return target_status
 
 
@@ -1070,6 +1183,7 @@ def _render_competitor_watch_section(sel_task: str, target_status: dict) -> None
     sorted_targets = sorted(
         target_status.items(),
         key=lambda x: (
+            x[1].get("list_priority", 9),
             -_freq_sort_score(x[1]),
             not x[1].get("is_waiting"),
             str(x[1].get("display", "")),
@@ -1419,6 +1533,13 @@ def _tl_enrich_rank_top1_merge_asof(
         return "—" if not s or s.lower() in ("nan", "none", "nat") else s
 
     out["Top1부동산"] = out["_name_top1"].map(_clean_top1_cell)
+
+    top1_unified = out["_name_top1"].apply(clean_realtor_name)
+    is_me_top1 = (top1_unified == my_name_unified) & (out["_name_top1"].notna())
+    if "State" in out.columns:
+        out.loc[is_me_top1, "State"] = "🟢 1~3위 방어 중"
+    out.loc[is_me_top1, "내순위"] = 1
+
     out = out.drop(columns=["_tl_idx", "_bkey", "_rank_m", "_name_top1", "_ts_mine", "_ts_top1"], errors="ignore")
     return out
 
@@ -3161,11 +3282,11 @@ def main() -> None:
             with col_txt2:
                 st.markdown("### 2️⃣ 광고 갱신 타이밍의 중요성")
                 st.markdown("""
-경쟁이 몰리는 시간대에 광고하는 그룹은 상위권에 올랐다가 약 0.5~1.4시간동안만에 자리를 빼앗겼습니다.
+경쟁이 몰리는 시간대에 광고하는 그룹은 상위권에 올랐다가 약 0.5\\~1.4시간동안만에 자리를 빼앗겼습니다.
 
-반면 가장 마지막에 광고를 갱신한 그룹은 1.8~4.1시간으로 경쟁 과열 시간대에 비해 3~4배 이상 유지되었습니다.
+반면 가장 마지막에 광고를 갱신한 그룹은 1.8\\~4.1시간으로 경쟁 과열 시간대에 비해 3\\~4배 이상 유지되었습니다.
 
-이 유지 시간은 이용자가 거의 없는 새벽 시간대 (00:00~07:59)를 제외한 시간입니다.
+이 유지 시간은 이용자가 거의 없는 새벽 시간대 (00:00\\~07:59)를 제외한 시간입니다.
 """)
 
             st.write("") # 간격 조정
@@ -3206,7 +3327,7 @@ body { margin: 0; font-family: sans-serif; }
     display: inline-block;
   ">PREMIUM SERVICE</span>
   <h2 style="margin: 15px 0 10px 0; color: #1e293b; font-size: 1.5rem; font-weight: 700;">🚀 탑랭크 AI 프리미엄 서비스 도입 비용</h2>
-  <h1 style="color: #2563eb; font-size: 3rem; margin: 10px 0; font-weight: 800;">월 90,000원</h1>
+  <h1 style="color: #2563eb; font-size: 3rem; margin: 10px 0; font-weight: 800;">단지 별 10,000원</h1>
   <p style="color: #475569; font-size: 1rem; line-height: 1.7; margin-bottom: 25px; font-weight: 500;">
     하루 커피 한 잔 값으로 우리 단지 내 <b>최상위 노출 점유율을 독점</b>하고,<br>
     소모적인 상단 갱신 경쟁과 불필요한 광고 스트레스에서 영원히 해방되세요!
