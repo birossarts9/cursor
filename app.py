@@ -474,16 +474,45 @@ _AI_REACH_GRACE_MINUTES = 5      # AI 추천 시각으로부터 ±이 분량 이
 _WAIT_NEAR_THRESHOLD_MIN = 30    # 임박(30분 이내)이면 대기 메시지를 보강
 
 
+def _is_my_rank_first_for_task(
+    task: str,
+    t_df: pd.DataFrame,
+    my_unified: str,
+) -> bool:
+    """해당 Task에서 내 최신 묶음내순위가 1위인지."""
+    if t_df.empty or "Task" not in t_df.columns or "묶음내순위_숫자" not in t_df.columns:
+        return False
+    sub = t_df[t_df["Task"] == task]
+    if sub.empty or "부동산명_통합" not in sub.columns:
+        return False
+    mine = sub[sub["부동산명_통합"] == my_unified]
+    if mine.empty:
+        return False
+    rank = pd.to_numeric(mine["묶음내순위_숫자"], errors="coerce").dropna()
+    if rank.empty:
+        return False
+    return int(rank.iloc[-1]) == 1
+
+
 def _determine_action_state(
     target_status: dict,
     any_waiting: bool,
+    *,
+    is_my_rank_first: bool = False,
 ) -> dict:
     """
     실시간 경쟁사 상황 기반 상태 판단.
     반환: {status, title, reason, palette}
-        status: "STRIKE" | "WAIT" | "FREE"
+        status: "DEFEND" | "STRIKE" | "WAIT" | "FREE"
         palette: 카드 색상 (bg / border / accent / text)
     """
+    palette_defend = {
+        "bg": "linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)",
+        "border": "#0f766e",
+        "accent": "#0d9488",
+        "text": "#115e59",
+        "subtext": "#0f766e",
+    }
     palette_strike = {
         "bg": "linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)",
         "border": "#2563eb",
@@ -505,6 +534,17 @@ def _determine_action_state(
         "text": "#065f46",
         "subtext": "#047857",
     }
+
+    if is_my_rank_first:
+        return {
+            "status": "DEFEND",
+            "title": "🛡️ 1위 방어 중 (지출 금지)",
+            "reason": (
+                "현재 해당 매물에서 1위를 굳건히 방어하고 있습니다. "
+                "경쟁사가 치고 올라오기 전까지는 광고비를 아끼고 대기하십시오."
+            ),
+            "palette": palette_defend,
+        }
 
     if not target_status:
         return {
@@ -783,6 +823,8 @@ def _render_tracking_tab_header(title_html: str, *, widget_key: str) -> str:
 def _status_badge_from_action(action: dict) -> tuple[str, str]:
     """(표시 라벨, 포인트 컬러)"""
     st_code = str(action.get("status", "FREE"))
+    if st_code == "DEFEND":
+        return "🛡️ 1위 방어 중", "#0f766e"
     if st_code == "STRIKE":
         return "🚀 지금 광고", "#185294"
     if st_code == "WAIT":
@@ -987,6 +1029,7 @@ def _build_target_status_for_task(
     top3_unified = latest_ranks[latest_ranks["묶음내순위_숫자"] <= 3]["부동산명_통합"].tolist()
     top3_set = set(top3_unified)
     _HIGH_FREQ_LABELS = frozenset({"🔥 매일 갱신", "⚡ 2일에 1번"})
+    _WAIT_ELIGIBLE_FREQ = frozenset({"🔥 매일 갱신", "⚡ 2일에 1번", "🚶 3~4일에 1번"})
 
     def _freq_for_realtor(r_uni: str) -> str:
         b_sub = pd.DataFrame()
@@ -1081,7 +1124,8 @@ def _build_target_status_for_task(
                     weekday_real = True if pd.isna(_wr) else bool(_wr)
 
         now_hour = kst_now.hour
-        is_genuine_threat = (r_uni in top3_set) or (freq_str in _HIGH_FREQ_LABELS)
+        # 상위권(1~3위)만으로는 대기 유발 불가 — 진성 위협 빈도(매일/2일/3~4일)만 is_waiting 허용
+        is_genuine_threat = freq_str in _WAIT_ELIGIBLE_FREQ
         _bad_peak = ("-", "패턴 불규칙", "", "nan")
         peak_usual_n = str(peak_usual).strip()
         peak_today_n = str(peak_today_wd).strip()
@@ -2743,9 +2787,13 @@ def main() -> None:
                         _any_wait_cmd = (
                             any(v.get("is_waiting") for v in _ts_cmd.values()) if _ts_cmd else False
                         )
+                        _is_rank1_cmd = _is_my_rank_first_for_task(
+                            _task_cmd, t_df_cmd, my_unified_cmd
+                        )
                         _act_cmd = _determine_action_state(
                             target_status=_ts_cmd,
                             any_waiting=_any_wait_cmd,
+                            is_my_rank_first=_is_rank1_cmd,
                         )
                         _command_rows.append((_task_cmd, _act_cmd, _ts_cmd))
 

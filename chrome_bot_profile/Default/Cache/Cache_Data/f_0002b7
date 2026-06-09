@@ -1,0 +1,1631 @@
+
+
+<!DOCTYPE HTML>
+<html lang="kr">
+<head>
+	<meta charset="utf-8">
+	<meta http-equiv="X-UA-Compatible" content="IE=edge" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0" />
+	<link type="text/css" rel="stylesheet" href="/app/css/common.css?ver4" />
+	<link type="text/css" rel="stylesheet" href="/app/css/contents.css?ver250221" />
+
+	<!-- Google tag (gtag.js) -->
+	<script async src="https://www.googletagmanager.com/gtag/js?id=G-PJJGCNQ2NC"></script>
+	<script>
+	  window.dataLayer = window.dataLayer || [];
+	  function gtag(){dataLayer.push(arguments);}
+	  gtag('js', new Date());
+	
+	  gtag('config', 'G-PJJGCNQ2NC');
+	</script>
+
+	<script type="text/javascript" src="/app/js/jquery-3.3.1.min.js"></script>
+
+	<style type="text/css">
+		/*body {*/
+		/*	overflow-y: auto; !* 스크롤 가능하게 *!*/
+		/*	-webkit-overflow-scrolling: touch; !* iOS에서 부드러운 터치 스크롤 활성화 (오버레이 스크롤바) *!*/
+		/*	-ms-overflow-style: none; !* IE/Edge *!*/
+		/*	scrollbar-width: none; !* Firefox *!*/
+		/*}*/
+
+		/*!* 스크롤바 완전 숨김 (공간 차지 방지) - 크로스 브라우저 지원 *!*/
+		/*body::-webkit-scrollbar {*/
+		/*	display: none; !* Chrome/Safari/Android *!*/
+		/*}*/
+
+		.asilScroll {
+			/* 1. 스크롤바가 생겨도 레이아웃이 틀어지지 않게 설정 */
+			overflow-y: auto;
+
+			/* 2. 표준 속성: 스크롤바 공간을 미리 확보하지 않고 위에 띄움 */
+			scrollbar-gutter: stable both-edges; /* 또는 상황에 따라 'auto' */
+
+			/* 3. Webkit (Chrome, Safari, Edge) 대응 */
+			-webkit-overflow-scrolling: touch; /* 모바일 부드러운 스크롤 */
+		}
+
+		/* 스크롤바 자체의 스타일을 투명하거나 얇게 조절 */
+		.asilScroll::-webkit-scrollbar {
+			width: 6px;  /* 스크롤바 너비 */
+			background: transparent; /* 배경 투명 */
+		}
+
+		.asilScroll::-webkit-scrollbar-thumb {
+			background: rgba(0, 0, 0, 0.2); /* 스크롤바 막대 색상 (투명도 조절 가능) */
+			border-radius: 10px;
+		}
+
+
+		.noUi-target {background:#e9e9e9; border-radius:5px;}
+		.noUi-connect {-webkit-border-radius:5px; -moz-border-radius:5px; border-radius:5px;}
+		.fontSize {margin-top:7px; text-align:right;}
+		.fontSize > a {display:inline-block; padding:1px 3px; font-size:12px; color:#777; border:1px solid #ccc;}
+		.temp {display:flex; flex-wrap:wrap;}
+		.info{padding:5px 0;}
+		.naver_map > .h2 {padding-bottom:6px;}
+		.toggle-btn {float:left; position:absolute; top:56px; z-index:100; transform:translateZ(0px);}
+		.toggle-btn > button { position:relative; height:30px; width: 50px; margin:0 2px; padding:0; font-size:13px; color:white; line-height:30px; border-radius:2px; background-color:#1c32f7;}
+		.toggle-btn > button.close {width:30px; background-color:rgba(0,0,0,0.3); background-image:url(/app/images/ico_del_w.png); background-repeat:no-repeat; background-position:center center; background-size:18px 18px;}
+
+		.mmbrPin {display:block; text-align:center;}
+		.mmbrPin > img {border-radius:50%; border:2px solid #ff5a5a;}
+		.mmbrPin.sizeZ > img {width:18px; height:18px;}
+		.mmbrPin.sizeS > img {width:27px; height:27px;}
+		.mmbrPin.sizeM > img {width:38px; height:38px;}
+		.mmbrPin.sizeB > img {width:50px; height:50px;}
+
+		.danji_name {padding:0 0 5px;}
+		.danji_name > dt > span {display:inline-block; width:auto; height:22px; margin:0 3px; padding:1px 5px; font-size:13px; color:#888; line-height:20px; border:1px solid #888; vertical-align:3px;}
+		.danji_name > dt > span.date {color:#1c32f7; border-color:#1c32f7;}
+		.danji_name > dt > span.cate {color:#ff0000; border-color:#ff0000;}
+		.danji_name > dt > strong {display:block; padding:5px 0 0;}
+		.danji_name > dd {letter-spacing:-0.04em;}
+		.danji_name > dd > .adr {padding-top:5px; font-size:14px; color:#555;}
+		.danji_name > dd > .feature {padding-top:2px; font-weight:bold; font-size:15px; color:#333;}
+		.danji_name > dd > .tag {padding-top:6px; margin-top:2px;}
+		.danji_name > dd > .tag > span {display:inline-block; height:20px; margin:0 1px; padding:0 5px; font-weight:bold; font-size:12px; color:#fff; line-height:18px; border:1px solid rgba(0,0,0,0.2);}
+		.danji_name > dd > .tag > span.wesn {background:#2f75b5;}
+		.danji_name > dd > .tag > span.part {background:#548235;}
+		.danji_name > dd > .tag > span.heat {background:#c65911;}
+		.danji_area {border-top:0;}
+		.danji_memo {display:flex; display:-webkit-flex; align-items:center; margin-top:10px; padding:20px 0; border-top:1px solid #eee; border-bottom:1px solid #eee;}
+		.danji_memo > .img {width:64px; line-height:0;}
+		.danji_memo > .img > img {width:52px; height:52px; border-radius:50%;}
+		.danji_memo >  dl {width:calc(100% - 64px); margin-top:-1px;}
+		.danji_memo >  dl > dt {font-weight:bold; font-size:16px; color:#1c32f7;}
+		.danji_memo >  dl > dd {padding-top:4px; font-size:14px; color:#555; line-height:22px; letter-spacing:-0.04em;}
+		.danji_cont {position:relative; padding:12px 0 0;}
+		.danji_cont > ul > li {display:flex; display:-webkit-flex; justify-content:space-between; font-size:14px; color:#555; line-height:30px;}
+		.danji_cont > ul > li > strong {font-weight:bold; color:#000;}
+		.danji_cont > ul > li > span.co1 {font-weight:bold;}
+		.danji_cont > ul > li.cnfc {display:block;}
+		.danji_cont > ul > li.cnfc > p {margin-top:3px; font-size:14px; color:#555; line-height:25px;}
+		.danji_cont > ul > li.cnfc > p > span {padding-right:6px;}
+
+		.danji_cont > .desc {margin:12px 0 0; font-size: 14px; padding:12px; background:rgb(245, 245, 245);}
+		.danji_cont > .photo {height:58px; margin-top:0; overflow-y:hidden;}
+		.danji_cont > .photo_expand {margin-bottom:15px;}
+		.danji_cont > .photo_expand span {display:none; height:0;}
+		/*.danji_cont > .photo_expand > p:before {content:''; position:absolute; top:0; left:0; z-index:1; display:block; width:100%; height:100%; background:url(/app/images/watermark.png) no-repeat center center;}*/
+
+		.apt_info > .btn_rprt {position:absolute; top:7px; right:11px; z-index:1; padding-left:18px; font-weight:bold; font-size:12px; background:url(/asil/images/ico_warning.png) no-repeat 0 0;}
+		.apt_info > .reg_date {position:absolute; top:7px; right:100px; /*left:11px;*/ z-index:1; font-size:12px;}
+		.apt_info > .btn_back {position:absolute; top:1px; left:6px; z-index:1; width:40px; height:40px; background:url(/app/images/arr_back.png) no-repeat center center; background-size:24px 24px; opacity:0.5; text-indent:-9999em;}
+
+		.danji_agent {position:relative;}
+		.danji_agent > .agent_info {margin:0; padding:10px 15px 0 15px;}
+		.danji_agent > .agent_info > p {margin:0; padding:0; font-weight:normal; font-size:14px; color:#000; line-height:22px;}
+		.agent_info > .call {top:-23px; right:-2px; width:32px; height:32px; overflow:hidden;}
+		.agent_info > .call > span {padding-top:36px; background-image:url(/app/images/ico_call6.png); background-size:32px 32px;}
+		.agent_info > .num {margin-top:10px; font-size: 12px !important;}
+		.agent_info > .btn {display:flex; display:-webkit-flex; margin-top:15px;}
+		.agent_info > .btn > a {display:block; width:32%; height:30px; margin-left:2%; font-weight:bold; font-size:14px; color:#1c32f7; line-height:28px; border:1px solid #1c32f7; text-align:center; cursor:pointer;}
+		.agent_info > .btn > a:first-child {margin-left:0;}
+		.agent_info > .btn > a.mml {color:#fff; border-color:#1c32f7; background:#1c32f7; }
+		.danji_short_wrap {position:relative;}
+		.danji_short_wrap > a {position:absolute; top:18px; right:16px; display:block; padding:2px 0 0 19px; text-decoration: underline; font-size:11px;}
+		.danji_short {padding:10px 15px 0 15px;}
+		.danji_short > p {font-size:14px; color:#666; line-height:22px;}
+
+		.btn_app_down {width:100%; background:#fff;}
+		.btn_app_down > a {display:block; height:50px; font-weight:bold; font-size:18px; color:#fff; border-radius:6px; line-height:50px; background:#1c32f7; text-align:center;}
+		.btn_app_down > a > span {padding-left:35px; background:url(/app/images/ico_apt2.png) no-repeat center center; background-size:26px 26px;}
+		.btn_app_down > a > span.site {background:url(/app/images/ico_site.png) no-repeat center center; background-size:24px 24px;}
+		.kakao_btn {position: relative; margin-top: 8px; background: #fff;}
+		.sale_kkt > .kkt_frm { position: absolute; left: 0; width: calc(100% - 0px); z-index: 999; margin-top: 0px; padding: 20px; border-radius: 12px; background: #fff; box-shadow: 0 2px 8px 2px rgb(0 0 0 / 20%); }
+		.sale_list_ver2 {background:#fafafa;}
+		.sale_list_ver2 > .item {padding-left:13px;}
+		.sale_list_ver2 > .item > .tit > span {margin-right:2px; padding:1px 3px 0; font-size:12px; color:#888; border:1px solid #888; vertical-align:middle;}
+		.sale_list_ver2 > .item > .info {font-weight:800; font-size:13px; color:#555;}
+		.sale_list_ver2 > .item > .info > strong {padding-right:5px; font-size:16px; font-weight:800; vertical-align:-1px;}
+		.sale_list_ver2 > .item > .info > strong > span {padding-right:5px; font-size:13px; vertical-align:middle;}
+		.sale_list_ver2 > .item > .info > span {position:relative; padding-left:13px; font-size:16px; color:#555;}
+		.sale_list_ver2 > .item > .info > span:before {content:''; position:absolute; top:3px; left:4px; display:block; width:1px; height:13px; background:#ccc;}
+		.sale_list_ver2 > .item > .cont {padding-top:3px; font-size:14px; color:#777; letter-spacing:-0.03em;}
+		.sale_list_ver2 > .item > .cont.photo {width:calc(100% - 47px); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+		.sale_list_ver2 > .item > .cont > span {font-weight:bold; color:#333;}
+		.hide { display: none; }
+		.m2:before {content:''; position:absolute; left:calc(50% - 27px); display:block; width:13px; height:13px; margin-top:5px; background:url(/asil/images/i_refresh.png) no-repeat 0 0; background-size:cover; opacity:0.8; }
+		.m2:after {content:'평전환'; color: #080808; position:absolute; left:calc(50% - 6px); display:block; margin-top:3px;  background-size:cover; opacity:0.8; }
+		.danji_area > li:nth-of-type(2) > strong { padding-left: 0; }
+		.mb-5 { margin-bottom: 5px}
+		.mb-10 { margin-bottom: 10px}
+		.mb-15 { margin-bottom: 15px}
+		.pl-5 { padding-left: 5px}
+		.sub_title { font-weight: 800; font-size: 14px; color: #000; letter-spacing: 0.02em}
+		.text-xs {font-size: 0.75rem; line-height: 1rem; }
+		.bg-orange { background-color: #f97316 }
+		.text-white { color: #fff }
+		.line {margin: 10px 0; border-top: 1px solid #f0f1f2; }
+		.agent_footer { display: flex; justify-content: end; color:  #777; gap: 10px;  align-items: baseline; margin-top: 5px}
+		.agent_footer .report { color: #6d6d6d; }
+		.agent_footer > .btn_rprt { padding-left:18px; font-weight:bold; font-size:10px; background:url(/asil/images/ico_warning.png) no-repeat 0 0;}
+		.agent_footer > div { font-size: 11px; }
+		.callCenter {position:fixed; right:0; bottom:0; left:0; z-index:999; display:flex; display:-webkit-flex;}
+		.callCenter > a {display:block; width:50%; height:54px; font-weight:bold; font-size:18px; color:#fff; line-height:54px; text-align:center; background:#1c32f7;}
+		.callCenter > a.full {width:100% }
+		.callCenter > span {position:absolute; top:14px; bottom:14px; left:50%; display:block; width:1px; background:rgba(255,255,255,0.8);}
+		[v-clock] { display: none; }
+		.roadviewMask {position:fixed; top:0; right:0; bottom:0; left:0; z-index:999; background:rgba(0,0,0,0.7);}
+		.roadviewPopup {position:fixed; top:16px; right:16px; bottom:70px; left:16px; z-index:992; padding:16px; background:#fff;}
+		.roadviewPopup > h2 {padding-bottom:8px;}
+		.roadviewPopup > .close {position:absolute; top:6px; right:6px; display:block; width:40px; height:40px; padding:10px 0 0 10px;}
+		.roadviewPopup > .close > span {display:block; width:20px; height:20px; background:url(/app/images/agent_ico_close.png) no-repeat center center; background-size:cover; text-indent:-9999em;}
+		.roadview {position:relative; height:calc(100% - 32px); background:#f5f5f5;}
+		.roadview > iframe {width:100%; height:100%;}
+
+		.btn_closePhoto {position:fixed; top:10px; right:10px; width:24px; height:24px; background:url(/app/images/ico_del_w.png) no-repeat center center; background-size:cover;}
+		.btn_closePhoto > span {display:inline-block; text-indent:-9999em;}
+		.btn_nextPhoto,.btn_prevPhoto {position: fixed; top:50%; width:30px; height:45px; margin-top:-23px; background-image:url(/app/images/arr.png); background-repeat:no-repeat;  background-size:60px 45px;}
+		.btn_nextPhoto {right:8px; background-position:right center;}
+		.btn_prevPhoto {left:8px; background-position:0 center;}
+		.btn_nextPhoto > span,
+		.btn_prevPhoto > span {display:inline-block; text-indent:-9999em;}
+		.layer_fee {z-index: 110;width:300px;position: absolute; background-color: white; right: 0; top: 27px; display: none;padding: 4px 9px; border: 1px solid gray; border-radius: 6px;}
+		.is-show { display: block; }
+		.layer_fee button { position: absolute; top: 7px; right: 9px; background: white; cursor: pointer }
+		.layer_fee .total { display: flex}
+		.layer_fee .total .price { margin-left: auto}
+		.layer_fee .description { border-top: 1px solid #edeff2; margin-top: 8px; padding-top: 4px}
+		.flex { display: flex}
+		.justify-between { justify-content: space-between }
+		.etc_list li {line-height:26px;}
+		.extraFee {padding-left:13px;}
+		.etc_list > li.item.bl {position:relative; padding-left:8px;}
+		.etc_list > li.item.bl:before {content:''; position:absolute; top:11px; left:0; display:block; width:4px; height:4px; border-radius:50%; background:#888;}
+
+		.watermark {position: absolute;top: 50%;left: 50%;transform: translate(-50%, -50%);color: rgba(255, 255, 255, 0.4);font-size: 20px;font-weight: bold;white-space: nowrap;text-shadow: 0 0 1px rgba(0, 0, 0, 0.1);pointer-events: none; display: flex; flex-direction: column;align-content: center;justify-content: center;align-items: center;gap: 7px;}
+	</style>
+</head>
+<body >
+
+<div id="app" >
+	<div class="roadviewMask" v-if="popup.show" v-clock >
+		<div class="roadviewPopup">
+			<h2 class="h2"># {{popup.title}}</h2>
+			<a class="close" @click="closePopup"><span>닫기</span></a>
+			<div class="roadview">
+				<iframe :src="popup.url" frameborder="0"></iframe>
+			</div>
+		</div>
+	</div>
+
+	<div class="callCenter" v-if="isValidOffer" v-clock>
+		<a :class="{full: !openSms}" @click="sendTelV()">전화상담</a>
+
+		<span v-if="openSms"></span>
+		<a v-if="openSms" @click="sendSmsV" >문자상담</a>
+	</div>
+
+	<div class="apt_info asilScroll"  style="padding-bottom:54px;"  v-clock>
+		<div class="reg_date" style="left:11px;"><span><!-- 등록일 : 년월일 --></span></div>
+		
+
+		
+		<div class="article mt0" >
+			<dl v-if="info.SVC_DATE_STRT === undefined" style="height: 90px; width: 100%">
+			</dl>
+			<dl class="danji_name">
+				<dt>
+					<span class="cate" style="display:none;"></span>
+					<span v-if="info.SVC_DATE_STRT !== undefined" class="date">{{ dateFormat(info.SVC_DATE_STRT) + '등록'}} </span>
+					<span v-if="buildingType !== ''">{{ buildingType }}</span>
+					<strong>{{ replaceBuilding(info.BLDNM) }} <span v-if="info.DONG_NM !== undefined && info.DONG_NM !== ''">{{info.DONG_NM}}동</span> <span v-if="!(convertFloor === '' || convertFloor === '-')">{{convertFloor}}층</span></strong>
+				</dt>
+				<dd>
+					<p class="adr">{{ info.mm_adr }}</p>
+
+				</dd>
+			</dl>
+			<ul class="danji_area" v-if="moneyLabel.label" v-clock="">
+				<li>
+					<span>가격</span>
+					<strong>{{moneyLabel.label}} {{moneyLabel.money}}<br><span class="per" v-if="priceByPy !== ''">평당 {{priceByPy}}만</span></strong>
+				</li>
+				<li>
+					<span class="label">{{ m2Label }}</span>
+					<strong style="position: relative">
+						<span v-if="info.spc1 !== '0'">{{ removeDecimalPoint(info.spc1) }}</span> <span class="slash" v-if="!(info.spc1 === '0' || info.spc2 === '0')">/</span> <span v-if="info.spc2 !== '0'">{{ removeDecimalPoint(info.spc2) }}</span>㎡<br>
+						<span class="py" onclick="togglePy()">{{ pyValue }}</span>
+						<span class="hide m2" onclick="togglePy()"></span>
+					</strong>
+				</li>
+			</ul>
+
+			<div class="danji_memo" @click="sendTelV">
+				<p class="img" ><img v-if="info.user_id" :src="getPhoto(agent.photo)"></p>
+				<dl>
+					<dt>{{agent.company}}</dt>
+					<dd v-if="info.FETR_DESC !== ''">{{info.FETR_DESC}}</dd>
+					<dd v-else>{{ contactNumber }}</dd>
+				</dl>
+			</div>
+
+			<div class="danji_cont">
+				<div v-if="images.length > 1 || (info.vr_flag === 'O' && info.naver_status == 3)" class="photo">
+					<ul>
+						<li v-if="info.vr_flag === 'O' && info.naver_status == 3">
+							<a :href="'https://fin.land.naver.com/articles/' + info.naver_uid +'/tour'" target="_blank" style="place-content: center; background-color: #00de5a!important; margin-bottom: 5px;">
+								<img src="./images/vr-icon.png" style="width: 26px; height: 15px; fill: none; top: 6px!important;" alt=""/>
+								<p style="color: #1e1e23; font-size: 11px; font-weight: bold; text-align: center; margin-top: 14px; letter-spacing: -1.9px;">매물투어</p>
+							</a>
+						</li>
+						<li  v-if="images.length > 1" v-for="(image, index) in images" @click="clickPhoto(index)" :key="index" >
+							<a :class="{on : selectedPhotoIndex === index}">
+								<img :src="image.img_val.replace('http://realty.asil.kr', 'https://realty.asil.kr')">
+								<span></span>
+							</a>
+						</li>
+					</ul>
+				</div>
+				<div class="photo_expand" @click="openPhotoMode()" style="display:block;" :style="{ display: images.length>0 ? 'block':'none'  }">
+					<span></span>
+					<div>
+						<img :src="selectedPhoto.replace('http://realty.asil.kr', 'https://realty.asil.kr')" />
+						<div class="watermark">
+							<p>아실</p>
+							<p class="text-xs">{{agent.company}}</p>
+						</div>
+					</div>
+				</div>
+				<ul>
+					<li v-if="false">
+						<strong>면적</strong>
+						<span>{{m2Value.replaceAll(".00", "")}}</span>
+					</li>
+					<li v-if="info.flr_1_val !== '0' && info.flr_2_val !== '0'">
+						<strong>해당층/총층</strong>
+						<span>{{convertFloor}}층/{{info.flr_2_val}}층</span>
+					</li>
+
+					<template v-if="isBunyang">
+						<li v-if="info.DEAL_AMT !== '0'">
+							<strong>가격</strong>
+							<span>{{info.amttxt}}</span>
+						</li>
+						<div style="margin-left: 10px; gap: 10px">
+							<div v-if="info.DEAL_AMT !== '0'" style="display: flex; justify-content: space-between">
+								<div>
+									<strong style="margin-right: 8px; font-weight:500">분양가</strong>
+								</div>
+								<div>
+									<span>{{numberToKorean(info.DEAL_AMT)}}</span>
+								</div>
+							</div>
+							<div v-if="info.premium_price2 !== '0'" style="display: flex; justify-content: space-between">
+								<div>
+									<strong style="margin-right: 8px; font-weight:500">프리미엄</strong>
+								</div>
+								<div>
+									<span>{{numberToKorean(info.premium_price2)}}</span>
+								</div>
+							</div>
+							<div v-if="info.optionPrice !== '0' && info.optionPrice !== ''" style="display: flex; justify-content: space-between">
+								<div>
+									<strong style="margin-right: 8px; font-weight:500">옵션가격</strong>
+								</div>
+								<div>
+									<span>{{numberToKorean(info.optionPrice)}}</span>
+								</div>
+							</div>
+						</div>
+					</template>
+
+					<li v-if="info.MVIN_PSBL_NM !== ''">
+						<strong>입주가능일자</strong>
+						<span class="co1">{{info.MVIN_PSBL_NM}}</span>
+					</li>
+					<li v-if="info.DRCTN_TP_NM !== ''">
+						<strong>방향</strong>
+						<span class="co1">{{info.DRCTN_TP_NM}}향<span v-if="info.directionBase_nm !== ''">/{{info.directionBase_nm}}</span></span>
+					</li>
+
+					<li v-if="info.loanCode !== '' && info.loanCode !== 'null'">
+						<strong>융자금</strong>
+						<span >{{generateLoanMessage(info.loanCode, info.FNC_AMT)}}</span>
+					</li>
+
+					<li  v-if="info.DEALTYPE_CD === 'A01' && (info.AL_WRRNT_AMT !== '' || info.AL_LEASE_AMT !== '')">
+						<strong>기보증금/월세</strong>
+						<span>{{ ALAmt }}</span>
+					</li>
+					<li style="position: relative" v-if="administrationCostInfo.chargeCodeType !== '' && administrationCostInfo.chargeCodeType !== undefined">
+						<strong>관리비</strong>
+						<div v-if="administrationCostInfo.chargeCodeType !== '03'">
+							<span>{{formatNumberWithCommas(maintenanceFee.total)}}원</span> <span style="text-decoration: underline; cursor: pointer; opacity: 80%;font-size: 13px" @click="toggleLayerFee()">상세보기</span>
+						</div>
+						<div v-else style="color: red">
+							<span>{{administrationCostInfo.chargeCodeType_nm}}</span> <span style="cursor: pointer; opacity: 0.8; font-size: 10px; color: #767678; border: 1px solid #767678; border-radius: 50%; padding: 1px 5px;" @click="toggleLayerFee()">?</span>
+						</div>
+						<div class="layer_fee" :class="isShow ? 'is-show' : ''" style="min-height: 33px">
+							<template v-if="administrationCostInfo.chargeCodeType !== '03'">
+								<strong class="title">관리비</strong>
+
+								<p class="total b co1">관리비 합계<strong class="price">{{formatNumberWithCommas(maintenanceFee.total)}}원</strong></p>
+
+								<ul class="etc_list">
+									<li class="item bl" v-if="maintenanceFee.message">{{maintenanceFee.message}}</li>
+									<li class="item bl" v-if="maintenanceFee.type === '02' || maintenanceFee.type === '04'">포함 항목(사용료) : {{maintenanceFee.include}}</li>
+									<li class="item flex justify-between" v-if="maintenanceFee.type === '01'"><span>공용</span> <span>{{formatNumberWithCommas(maintenanceFee.fees.public)}}원</span></li>
+									<li class="item flex justify-between" v-if="maintenanceFee.type === '01'"><span>사용료</span> <span>{{formatNumberWithCommas(maintenanceFee.fees.extras.total)}}원</span></li>
+									<li class="item flex justify-between extraFee" v-for="(extraFee, index) in maintenanceFee?.fees?.extras?.items"  :key="index" >
+										<span>- {{extraFee.name}}</span> <span>{{extraFee.amount}}</span>
+									</li>
+								</ul>
+								<p class="description">관리비 기준 : {{maintenanceFee.standardForFee}}</p>
+
+								<button type="button" class="button_close"  @click="toggleLayerFee()">
+									<i class="icon">
+										<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 14 14" fill="none">
+											<path fill-rule="evenodd" clip-rule="evenodd" d="M0.636012 0.636418C0.343119 0.929311 0.343119 1.40419 0.636012 1.69708L12.3027 13.3637C12.5956 13.6566 13.0704 13.6566 13.3633 13.3637C13.6562 13.0709 13.6562 12.596 13.3633 12.3031L1.69667 0.636418C1.40378 0.343525 0.928905 0.343525 0.636012 0.636418Z" fill="#929294"></path><path fill-rule="evenodd" clip-rule="evenodd" d="M13.3635 0.636418C13.6564 0.929311 13.6564 1.40419 13.3635 1.69708L1.69683 13.3637C1.40394 13.6566 0.929067 13.6566 0.636174 13.3637C0.343281 13.0709 0.343281 12.596 0.636174 12.3031L12.3028 0.636418C12.5957 0.343525 13.0706 0.343525 13.3635 0.636418Z" fill="#929294">
+										</path>
+										</svg>
+									</i>
+									<span class="blind">관리비 닫기</span>
+								</button>
+							</template>
+							<template v-else>
+								<div style="padding: 2px 12px 2px 2px; word-break: keep-all; line-height: 1.5;">{{maintenanceFee.message}}</div>
+								<button type="button" class="button_close"  @click="toggleLayerFee()">
+									<i class="icon">
+										<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 14 14" fill="none">
+											<path fill-rule="evenodd" clip-rule="evenodd" d="M0.636012 0.636418C0.343119 0.929311 0.343119 1.40419 0.636012 1.69708L12.3027 13.3637C12.5956 13.6566 13.0704 13.6566 13.3633 13.3637C13.6562 13.0709 13.6562 12.596 13.3633 12.3031L1.69667 0.636418C1.40378 0.343525 0.928905 0.343525 0.636012 0.636418Z" fill="#929294"></path><path fill-rule="evenodd" clip-rule="evenodd" d="M13.3635 0.636418C13.6564 0.929311 13.6564 1.40419 13.3635 1.69708L1.69683 13.3637C1.40394 13.6566 0.929067 13.6566 0.636174 13.3637C0.343281 13.0709 0.343281 12.596 0.636174 12.3031L12.3028 0.636418C12.5957 0.343525 13.0706 0.343525 13.3635 0.636418Z" fill="#929294">
+										</path>
+										</svg>
+									</i>
+									<span class="blind">닫기</span>
+								</button>
+							</template>
+
+						</div>
+					</li>
+
+
+					<li v-if="validNumber(info.MTNC_AMT) && administrationCostInfo.chargeCodeType === undefined">
+						<strong>관리비(평균)</strong>
+						<span>{{info.MTNC_AMT}}원</span>
+					</li>
+					<li v-if="validNumber(info.MTNC_AMT) && info.mnexItems_val !== '' && administrationCostInfo.chargeCodeType === undefined">
+						<strong>관리비 포함</strong>
+						<span>{{info.mnexItems_val}}</span>
+					</li>
+
+					<li v-if="info.ERTC_TYPE_NM !== '' && info.ERTC_TYPE_NM !== '-'">
+						<strong>현관구조</strong>
+						<span >{{info.ERTC_TYPE_NM}}</span>
+					</li>
+
+					<li v-if="info.TOT_FML_CNT !== '0'">
+						<strong>총세대수</strong>
+						<span>{{numberFormat3Dot(info.TOT_FML_CNT)}}세대</span>
+					</li>
+					<li v-if="info.prkg_cnt !== '0'">
+						<strong>총 주차대수</strong>
+						<span>{{numberFormat3Dot(info.prkg_cnt)}}대</span>
+					</li>
+					<li v-if="info.BTRM_CNT !== '0' ||info.RM_CNT !== '0'">
+						<strong>방수/욕실수</strong>
+						<span> {{info.RM_CNT === '0' ? '-' : info.RM_CNT}}/{{ info.BTRM_CNT === '0' ? '-' : info.BTRM_CNT }}개</span>
+					</li>
+					<li v-if="!(info.CNST_DATE === '' || info.CNST_DATE === '-')">
+						<strong>{{ info.cdateType_nm}}</strong>
+						<span>{{info.CNST_DATE }}</span>
+					</li>
+					<li v-if="info.RLSTTYPE_CD == 'C01'">
+						<strong>건축물용도</strong>
+						<span>{{ info.lawUsageCode_nm}}</span>
+					</li>
+
+					<li :class="{cnfc: builtins.length > 3}" v-if="builtins.length > 0">
+						<strong>시설정보</strong>
+						<span v-if="builtins.length < 3">
+							<span style="margin-right: 5px" v-for="(builtin, index) in builtins" :key="index">
+									{{ builtin.builttin_val }}
+							</span>
+						</span>
+						<p v-else>
+							<span v-for="(builtin, index) in builtins" :key="index">
+								{{ builtin.builttin_val }}
+							</span>
+						</p>
+					</li>
+
+					<li >
+						<strong>매물번호(아실)</strong>
+						<span>{{ info.kiso_mm_uid}}</span>
+					</li>
+
+				</ul>
+
+				<div class="desc" v-if="details !== ''">
+					<p v-html="details"></p>
+					<div class="fontSize" style="display: none">
+						<a href="javascript:void(0)" class="sizeB" onclick="wdSetFontSize('desc',+3);return false;">글자크게</a>
+						<a href="javascript:void(0)" class="sizeS" onclick="wdSetFontSize('desc',-3);return false;" style="display: none">글자작게</a>
+					</div>
+				</div>
+				<div class="kakao_btn sale_kkt" >
+					<a href="javascript:clickKakao()" id="kkt" class="kkt" style="width:100%;"><span></span>카카오톡으로 매물 공유하기</a>
+					<div class="kkt_frm" style="display:none;">
+						<a href="javascript:hideKakao()" class="close">닫기</a>
+						<dl>
+							<dt>이름</dt>
+							<dd><input type="text" id="name" style="width:calc(65% - 5px);" maxlength="10"></dd>
+						</dl>
+						<dl>
+							<dt>휴대폰</dt>
+							<dd style="display:flex; display:-webkit-flex;">
+								<input type="text" id="cel1" value="010" style="width:calc(30% - 10px);" maxlength="3">
+								<span class="hyp">-</span>
+								<input type="text" id="cel2" style="width:calc(35% - 15px);" maxlength="4">
+								<span class="hyp">-</span>
+								<input type="text" id="cel3" style="width:calc(35% - 15px);" maxlength="4">
+							</dd>
+						</dl>
+						<a href="javascript:sendKakao()" class="btn"><span></span>카카오톡 받기</a>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		
+		<!-- 네이버 맵 -->
+		<div class="article naver_map">
+			<h2 class="h2" style=" white-space:nowrap;overflow:hidden; text-overflow:ellipsis;"># 매물 위치</h2>
+			<div class="toggle-btn" style="left:24px;">
+				<button id="street">로드뷰</button>
+				<button v-if="!panoramaMode" id="agent" @click="toggleMakerLocation">{{isOffer ? '중개사' : '매물'}}</button>
+			</div>
+			<div v-if="!panoramaMode" class="toggle-btn" style="right:24px;">
+				<button id="normal" @click="toggleMapType">{{normalMap ? '항공' : '일반'}}</button>
+			</div>
+			<div v-if="panoramaMode" class="toggle-btn" style="right:24px;">
+				<button class="close" id="" @click="closePanoMode"></button>
+			</div>
+			<div id="map" style="width:100%; height:320px;"></div>
+			<div id="roadview" style="width:100%; height:320px; display:none;"></div>
+		</div>
+		
+
+
+		<!-- 매물 정보 -->
+		<div v-if="offers.length > 0" class="article apt_info_sale" style="display:block; padding-bottom:0;">
+			<h2 class="h2"># {{agent.company}} 매물</h2>
+			<div class="sale_list_wrap mt10" style="margin:0 -16px; z-index:998;">
+				<div id="sale_list" class="sale_list_ver2" style="overflow:hidden;">
+					<div v-for="(offer, index) in offers" :key="index" class="item " @click="openSale1(offer.mm_uid)" style="padding: 13px">
+						<p class="tit"><span>{{replaceBuilding(offer.SUB_RLSTTYPE_NM)}}</span> {{offer.BLDNM}}</p>
+						<p class="info">
+							<strong :class="offerTypeClass(offer.DEALTYPE_CD)">
+								<span :class="offerTypeClass(offer.DEALTYPE_CD)">{{offer.DEALTYPE_NM}}</span>
+								{{money(index)}}
+							</strong>
+							<span>{{replaceLastZero(offer.spc_v1)}}㎡</span>
+						</p>
+						<p class="cont" :class="{photo: offer.PHTO_PATH.length > 0}" :title="offer.FETR_DESC">
+							<span v-if="offer.BDONG_NM !== ''">{{offer.BDONG_NM}}동 </span>
+							<span v-if="offer.CORES_FLR_CNT_NM !== '' && offer.CORES_FLR_CNT_NM !== '0'"> {{offer.CORES_FLR_CNT_NM}}층 </span>{{offer.FETR_DESC}}
+						</p>
+						<p class="date">{{offer.SVC_DATE_STRT}}</p>
+						<div v-if="offer.PHTO_PATH.length > 0" class="thumb">
+							<p>
+								<img :src="offer.PHTO_PATH" style="width:40px; height:40px;" />
+							</p>
+							<span>{{offer.PHTO_CNT}}</span>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		
+		<div class="article danji_wrap">
+			<h2 class="h2"># {{replaceBuilding(info.BLDNM)}} 기본정보</h2>
+			<div class="danji_cont">
+				<ul>
+					<li><strong>주소</strong> <span>서울 송파구 잠실동 19</span></li>
+					<li><strong>준공년월</strong> <span class="co1">2008년 9월 건축</span></li>
+					<li><strong>세대수</strong> <span class="co1">총 5,678세대</span></li>
+					<li><strong>동수</strong> <span class="co1">총 72개동</span></li>
+					<li><strong>난방방식</strong> <span>지역난방 (열병합)</span></li>
+				</ul>
+			</div>
+		</div>
+		
+		<!-- 중개사 정보 -->
+		<div class="article danji_agent">
+			<h2 class="h2"># {{agent.company}}</h2>
+			<div class="agent_info">
+				<p class="name">대표 {{agent.name}}</p>
+				<p class="addr">{{agent.addr}}</p>
+				<p class="tel" @click="sendTelV">{{contactNumber}}</p>
+				<p class="num">등록번호 {{agent.bizNo}} </p>
+				<p class="call" @click="sendTelV"><span>문의하기</span></p>
+				
+			</div>
+		</div>
+
+		<div class="article danji_short_wrap">
+			<h2 class="h2">{{moneyLabel.label.replace("보증금/월세" , "월세")}} {{moneyLabel.money}}</h2>
+			<a href="javascript:void(0)" class="report">허위매물신고</a>
+			<div class="danji_short">
+				<p class="summary_info">{{ replaceBuilding(info.BLDNM) }} <span v-if="info.DONG_NM !== ''">{{info.DONG_NM}}동</span> <span v-if="!(info.flr_1_val === '' || info.flr_1_val === '0')">{{convertFloor}}층</span> </p>
+				<p class="summary_feature">{{info.FETR_DESC}}</p>
+			</div>
+		</div>
+
+		<div v-if="isComplexes" class="article danji_inout">
+			<h2 class="h2"># 단지 내외부</h2>
+			<ul class="danji_view">
+				
+				<li><a class="map" @click="openPopup('단지위치', '/app/sub/map.jsp?os=pc>&mode=3&title=' + info.BLDNM +'&lat=37.5129328&lng=127.0814839&zoom=6')" >지도보기</a></li>
+				<li><a class="road" @click="openPopup('로드뷰', '/app/roadview_control.jsp?os=pc&lat=37.5129328&lng=127.0814839')">로드뷰</a></li>
+				<li><a class="sky" @click="openPopup('항공뷰', '/app/skyview.jsp?os=pc&building=apt&lat=37.5129328&lng=127.0814839&naver=' + info.hscp_no)" >항공뷰</a></li>
+				
+			</ul>
+
+		</div>
+
+		
+		<div class="article agent_home_btn" style="margin-bottom:0;">
+			<div class="btn_app_down">
+				<a target="_blank" @click="agentHome"><span class="site"></span>중개사 홈페이지</a>
+			</div>
+		</div>
+		
+	</div>
+	
+	<div class="mask3">
+		<div class="call_ansim3" >
+			<p class="tit"><strong>아실앱보고 연락주셨다고 말씀주시면<br />보다 빠른 상담 가능합니다.</strong><br/><span id="tel050">{{contactNumber}}</span></p>
+		</div>
+	</div>
+	<div class="mask5" v-if="isCloseOffer" v-clock>
+		<div class="call_ansim3" style="padding-top: 40px">
+			<p class="tit"><strong>{{info.PRCS_CD == 20 ? '등록 대기중인 매물입니다':'존재하지 않는 매물입니다'}}</strong></p>
+		</div>
+	</div>
+
+</div>
+
+<script type="text/javascript" src="https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=5rpedhhaec&submodules=panorama"></script>
+<script type="text/javascript" src="https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=5rpedhhaec&submodules=geocoder"></script>
+
+
+
+<script type="text/javascript" src="/app/js/vue.global.js?1"></script>
+<script>
+
+	const isPhone = false;
+	const uid = '';
+	const {createApp} = Vue;
+	const app = createApp({
+		data() {
+			return {
+				popup: {
+					show: false,
+					title: '',
+					url: '',
+				},
+				openSms: true,
+				isPhone: isPhone,
+				uid: uid,
+				isOffer: true,
+				onLoading: false,
+				normalMap : true,
+				selectedIndex: -1,
+				selectedPhotoIndex: 0,
+				photoModeIndex: 0,
+				isPhotoMode: false,
+				agent:{},
+				info: {},
+				builtins:[],
+				offers:[],
+				images:[],
+				aptCode: ['A01','A04','B01','F01'],
+				officetelCode: ['A02','B02'],
+				panoramaMode: false,
+				isShow: false,
+				administrationCostInfo: {
+					chargeCodeType: '',
+					chargeCodeType_nm: '',
+					chargeCriteriaCode: '',
+					chargeCriteriaCode_nm: '',
+					chargeInputContent: '',
+					etcFeeDetails: {
+						detailCodeType: '',
+						detailCodeType_nm: '',
+						etcFeeAmount: '',
+						includeCodeTypes: [],
+						includeCodeTypes_nm: [],
+					}
+				}
+			}
+		},
+		methods: {
+			// 관리비 1000 -> 1,000 로 변환
+			formatNumberWithCommas(amount) {
+				return amount ? amount.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",") : '';
+			},
+			toggleLayerFee() {
+				this.isShow = !this.isShow;
+			},
+			validNumber(amount) {
+				if (amount === null || amount === undefined) {
+					return false;
+				}
+				let amt = amount.replace(/,/gi, "");
+				return amt > 0;
+			},
+			openPopup(title, url) {
+				this.popup.show = true;
+				this.popup.title = title;
+				this.popup.url = url;
+				addNoScroll();
+			},
+			closePopup() {
+				this.popup.show = false;
+				this.popup.title = '';
+				this.popup.url = '';
+				removeNoScroll();
+			},
+			closePanoMode() {
+				this.panoramaMode = false;
+				closePano();
+			},
+			setPanoramaMode(isPano) {
+				this.panoramaMode = isPano;
+			},
+			agentHome() {
+				openHomepage(this.agent.cel)
+			},
+			clickPhoto(index){
+				this.selectedPhotoIndex = index;
+			},
+			sendTelV() {
+				
+				if (this.isPhone || this.uid !== '') {
+					location.href = 'tel:' + this.agent.cel;
+				} else {
+					sendTel(this.agent.cel);
+				}
+			},
+			sendSmsV() {
+				const message = "[아실] 잠실엘스 "
+						+ this.info.spc1 + "㎡(" + Math.round(this.info.spc1_1) + '평' + ") \n"
+						+ this.convertFloor + "층 " + this.moneyLabel.label +  " " + this.moneyLabel.money
+						+  " 매물 문의드립니다.\n(매물번호 38520968)";
+
+				
+				if (this.isPhone || this.uid !== '') {
+					location.href = 'sms:' + this.agentTel + '?' + 'body=' + message;
+				} else {
+					sendSms(this.agentTel, message);
+				}
+			},
+			removeDecimalPoint(n) {
+				return Math.floor(parseFloat(n) || 0);
+			},
+			replaceLastZero(n) {
+				if (n === null || n === undefined || n === "NaN" || n === "") {
+					return n;
+				}
+				try {
+					const num = parseFloat(parseFloat(n).toFixed(15).replace(/0+$/, ""))
+					return num;
+				} catch (e) {
+					return ""
+				}
+			},
+			money(index) {
+				const { DEALTYPE_CD, DEAL_AMT, WRRNT_AMT, LEASE_AMT } = this.offers[index];
+				if (DEALTYPE_CD === 'A01') {
+					return this.numberToKorean(DEAL_AMT);
+				} else 	if (DEALTYPE_CD === 'B01') {
+					return this.numberToKorean(WRRNT_AMT);
+				} else {
+					return this.numberToKorean(WRRNT_AMT) + "/" + this.numberToKorean(LEASE_AMT);
+				}
+			},
+			dateFormat(register){
+				if (register === null || register === undefined || register === '') {
+					return register;
+				}
+				return register.substring(0, 4) + "." + register.substring(4, 6) + "." + register.substring(6);
+			},
+			generateLoanMessage(code, number) {
+				const message1 = code === "0" ? "없음" : code === "1" ? "30% 미만" : code === "2" ? "30% 이상" : "";
+				return message1 !== '' ? message1 : this.numberToKorean(number);
+			},
+			numberToKorean(number) {
+				if (number === null || number === undefined) {
+					return '';
+				}
+				let prefix = "";
+				if (number.startsWith("-")) {
+					prefix = "-";
+					number = number.replace("-", "");
+				}
+
+				number = number.replace(/,/gi, "");
+				number = number * 10000;
+				let inputNumber = number < 0 ? false : number;
+				let unitWords = ['', '만', '억', '조', '경'];
+				let splitUnit = 10000;
+				let splitCount = unitWords.length;
+				let resultArray = [];
+				let resultString = '';
+				for (let i = 0; i < splitCount; i++) {
+					let unitResult = (inputNumber % Math.pow(splitUnit, i + 1)) / Math.pow(splitUnit, i);
+					unitResult = Math.floor(unitResult);
+					if (unitResult > 0) {
+						resultArray[i] = unitResult;
+					}
+				}
+
+				for (let i = 0; i < resultArray.length; i++) {
+					if (!resultArray[i]) continue;
+					resultString = String(resultArray[i]).toString() + unitWords[i] + resultString;
+				}
+				return prefix + resultString;
+			} ,
+			toggleMakerLocation(){
+				this.isOffer = !this.isOffer;
+				if (this.isOffer) {
+					
+					moveMap(37.5129328, 127.0814839);
+					
+
+				} else {
+					moveMap(this.agent.lat, this.agent.lng)
+				}
+			},
+			toggleMapType() {
+				this.normalMap = !this.normalMap;
+				if (this.normalMap) {
+					setMapType('NORMAL');
+				} else {
+					setMapType('SATELLITE');
+				}
+			},
+
+			setAgent(agent) {
+				this.agent = agent;
+				if (!agent.cel.startsWith('010') && (!agent.tel.startsWith('010'))) {
+					this.openSms = false;
+				}
+			},
+			setInfo(info) {
+				this.info = info
+			},
+			navigateTo(title, url) {
+				setLink(title, url);
+			},
+			navigateOut(url1, url2){
+				setOutLink(url1, url2);
+			},
+			setAdministrationCostInfo(info) {
+				this.administrationCostInfo = info;
+			},
+			setOffers(offers) {
+				this.offers = [...offers];
+			},
+			setImages(images) {
+				this.images = [...images];
+			},
+			setBuiltinOptions(options) {
+				this.builtins = [...options];
+			},
+			openSale1(mmUid) {
+				openSale(mmUid);
+			},
+			offerTypeClass(dealType) {
+				if (dealType === 'A01') {
+					return 'co1';
+				} else if (dealType === 'B01'){
+					return 'co2';
+				} else {
+					return 'co3'
+				}
+			},
+			replaceBuilding(building) {
+				if (building === undefined) {
+					return building;
+				}
+				return building.replace("주택-", "").replace("건물-", "").replace("공장-", "").replace("원룸-방", "원룸");
+			},
+			numberFormat3Dot(number) {
+				if (number === null || number === undefined) {
+					return number
+				}
+				return number.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+			},
+
+			moneyText() {
+				// {{info.pr_area_tit}} {{info.amttxt}}
+			},
+			getPhoto (url) {
+				if (url === null || url === undefined) {
+					return "";
+				}
+				return url + "?" + 602175434;
+			},
+			openPhotoMode() {
+				
+				    let options = "toolbar=no,scrollbars=no,resizable=yes,status=no,menubar=no,width=1008, height=734, top=0,left=0";
+					window.open('https://asil.kr/app/imageGallery.jsp?o=38520968&idx=' + this.selectedPhotoIndex, '아실 매물 갤러리', options);
+				
+			},
+			closePhotoMode() {
+				this.isPhotoMode = false;
+			},
+			prevPhoto() {
+				let index = this.photoModeIndex - 1;
+				if (index < 0) {
+					index = this.images.length - 1;
+				}
+				this.photoModeIndex = index;
+			},
+			nextPhoto() {
+				let index = this.photoModeIndex + 1;
+				if (this.images.length === index) {
+					index = 0;
+				}
+				this.photoModeIndex = index;
+			}
+		},
+		computed: {
+			maintenanceFee () {
+				const { chargeCodeType, chargeInputContent ,chargeCriteriaCode_nm, etcFeeDetails, fixedFeeDetails } = this.administrationCostInfo;
+				let total = '';
+				let message = '';
+				let include = '';
+				let standardForFee = '';
+				let fees = {};
+				let type = '';
+
+				if (this.administrationCostInfo?.chargeCodeType !== '') {
+					type = chargeCodeType
+					if (chargeCriteriaCode_nm === '기타') {
+						standardForFee = chargeInputContent;
+					} else {
+						standardForFee = chargeCriteriaCode_nm;
+					}
+
+					if (chargeCodeType === '01') {
+						total =  fixedFeeDetails.reduce((sum, detail) => {
+							if (detail.amount) { return sum + parseFloat(detail.amount); }
+							return sum;
+						}, 0);
+
+						fees['public'] = fixedFeeDetails
+								.filter(detail => detail.detailCodeType === '01')
+								.reduce((sum, detail) => {
+									if (detail.amount) { return sum + parseFloat(detail.amount); }
+									return sum;
+								}, 0);
+						const extraTotalAmount = fixedFeeDetails
+								.filter(detail => detail.detailCodeType !== '01')
+								.reduce((sum, detail) => {
+							if (detail.amount) { return sum + parseFloat(detail.amount); }
+							return sum;
+						}, 0);
+
+						const items =  fixedFeeDetails
+								.filter(detail => detail.detailCodeType !== '01')
+								.map(detail => {
+										const amount = detail.amount ? detail.amount+ '원': '실비';
+										const name = detail.detailCodeType_nm
+												.replace('사용료', '')
+												.replace('료', '')
+												.replace('난방비', '난방');
+										return { name, amount}
+								})
+
+						fees['extras'] = {
+							total: extraTotalAmount,
+							items
+						}
+					} else if (chargeCodeType === '03') {
+						const detailCode = this.administrationCostInfo?.unableCheckDetails?.detailCodeType;
+						if (detailCode === '01') {
+							message = "건축법 시행령 별표1의 제 1호 가목의 단독주택입니다.";
+						} else if (detailCode === '02') {
+							message = "오피스텔 제외 상가 건물입니다.";
+						} else if (detailCode === '03') {
+							message = "미등기 또는 신축건물은 관리비 확인이 어렵습니다.";
+						}
+					} else if (chargeCodeType === '02') {
+						total = etcFeeDetails.etcFeeAmount;
+						if (etcFeeDetails.detailCodeType === '01') {
+							message = '관리규약 등에 따라 부과';
+						} else if (etcFeeDetails.detailCodeType === '02') {
+							message = '면적/세대별 공용관리비와 사용량에 따른 사용료를 합산하여 부과해요';
+						} else if (etcFeeDetails.detailCodeType === '04') {
+							message = '세대별 별로 계량기 사용량에 따라 부과해요';
+						} else {
+							message = etcFeeDetails.detailCodeType_nm;
+						}
+						let includes;
+						if (etcFeeDetails.includeCodeTypes_nm) {
+							includes = etcFeeDetails.includeCodeTypes_nm.map(v => {
+								return v.replace('관리비', '').replace('사용료','');
+							});
+						} else {
+							includes = [];
+						}
+
+						include = includes.filter(item => item !== '').join(', ');
+						if (include === '') {
+							include = '-';
+						}
+					} else if (chargeCodeType === '04') {
+						total = etcFeeDetails.etcFeeAmount;
+						message = etcFeeDetails.detailCodeType_nm
+						let includes;
+						if (etcFeeDetails.includeCodeTypes_nm) {
+							includes = etcFeeDetails.includeCodeTypes_nm.map(v => {
+								return v.replace('관리비', '').replace('사용료','');
+							});
+						} else {
+							includes = [];
+						}
+
+						include = includes.join(', ');
+						if (include === '') {
+							include = '-';
+						}
+					}
+				}
+
+				if (total === null) {
+					total = '0';
+				}
+				return { total, message, include, standardForFee, fees, type }
+			},
+			ALAmt () {
+				let { AL_WRRNT_AMT : w, AL_LEASE_AMT : l } = this.info;
+				w = (w === undefined || w === '') ? '-' :  this.numberToKorean(w);
+				l = (l === undefined || l === '') ? '-' :  this.numberToKorean(l);
+
+				return w + "/" + l;
+			},
+			isCloseOffer() {
+				const { PRCS_CD }  = this.info;
+				if (PRCS_CD === null || PRCS_CD === undefined) {
+					return false;
+				}
+				return PRCS_CD != 4;
+			},
+			isValidOffer() {
+				const { PRCS_CD }  = this.info;
+				if (PRCS_CD === null || PRCS_CD === undefined) {
+					return false;
+				}
+				return PRCS_CD === '4' || PRCS_CD === '20';
+			},
+			contactNumber() {
+				const { cel , tel} = this.agent;
+				if (cel === null || tel === null || cel === undefined || tel === undefined) {
+					return '';
+				}
+				if (cel === tel) {
+					return cel;
+				}
+				return cel + " / " + tel;
+			},
+			convertFloor() {
+				const {	flr_1_val: floor } = this.info;
+				if (floor === null || floor === undefined || floor == 0) {
+					return '';
+				}
+				if (floor.length > 1 && floor.startsWith("-")) {
+					return floor.replace("-", "지하")
+				}
+				return floor;
+			},
+			building() {
+				const {RLSTTYPE_CD: type } = this.info;
+				if (type === null || type === undefined) {
+					return '';
+				}
+				if (this.aptCode.indexOf(type) >= 0) {
+					return 'apt';
+				} else if (this.officetelCode.indexOf(type) >= 0) {
+					return 'officetel';
+				} else {
+					return '';
+				}
+			},
+			moneyLabel() {
+				let {pr_area_tit, amttxt} = this.info;
+				if (amttxt === null || amttxt === undefined) {
+					return {label : '', money: ''};
+				} else {
+					if (amttxt.startsWith('0 /')) {
+						amttxt = amttxt.replace('0 / ', '') + "만";
+						pr_area_tit = pr_area_tit.split('/')[1];
+					}
+					pr_area_tit = pr_area_tit.replace('가', '');
+					pr_area_tit = pr_area_tit.replace('보증금/', '');
+					return {label : pr_area_tit, money: amttxt};
+				}
+			},
+			isComplexes(){
+				const {RLSTTYPE_CD } = this.info;
+				if (RLSTTYPE_CD === null || RLSTTYPE_CD === undefined) {
+					return true;
+				}
+				return RLSTTYPE_CD.startsWith("A") || RLSTTYPE_CD.startsWith("B") || RLSTTYPE_CD === "F01";
+			},
+			isApt() {
+				const {RLSTTYPE_CD } = this.info;
+				if (RLSTTYPE_CD === null || RLSTTYPE_CD === undefined) {
+					return true;
+				}
+				return RLSTTYPE_CD === 'A01' || RLSTTYPE_CD === 'A04' ||RLSTTYPE_CD === 'B01' ||RLSTTYPE_CD === 'F01';
+			},
+			agentTel() {
+				const {cel, tel} = this.agent;
+				if (cel === null || cel === undefined) {
+					return "";
+				}
+				if (cel.startsWith("01") || tel.startsWith("01")) {
+					return cel.startsWith("01") ? cel : tel;
+					//return "";
+				} else {
+					return "";
+				}
+			},
+			selectedPhoto() {
+				if (this.images.length === 0) {
+					return '';
+				}
+				return this.images[this.selectedPhotoIndex].img_val;
+			},
+			selectedPhotoMode() {
+				if (this.images.length === 0) {
+					return '';
+				}
+				return this.images[this.photoModeIndex].img_val;
+			},
+			buildingType() {
+				const {hscp_no,  SUB_RLSTTYPE_NM : building } = this.info;
+
+				if (building === null || building  === undefined) {
+					return '';
+				}
+
+				if (hscp_no === '151148') {
+					return '아파트';
+				}
+				return this.replaceBuilding(building);
+			},
+			isBunyang() {
+				const { SUB_RLSTTYPE_NM : building } = this.info;
+				if (building === null || building  === undefined) {
+					return false;
+				}
+				return building.indexOf("분양권") > 0;
+			},
+			priceByPy() {
+				const { DEALTYPE_CD, DEAL_AMT, WRRNT_AMT, spc1 } = this.info;
+				let price = DEALTYPE_CD === 'A01' ? DEAL_AMT : WRRNT_AMT;
+
+				if (spc1 <= 0 ) {
+					return '';
+				}
+
+				price = Math.round(price / (spc1 * 0.3025));
+				return price.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+			},
+			m2Label() {
+				const { DEALTYPE_CD, spctit1, spctit2, spc1, spc2 } = this.info;
+				return DEALTYPE_CD === "E03" ? spctit1 : spc1 === "0" ? spctit2 : spc2 === "0" ? spctit1 :  spctit1 + '/' + spctit2;
+			},
+			m2Value() {
+				// <span>공급 {{info.spc1}}㎡ 전용 {{info.spc2}}㎡</span>
+				let { DEALTYPE_CD, spctit1, spctit2, spc1, spc2, org_ptp_nm } = this.info;
+				if (DEALTYPE_CD === null || DEALTYPE_CD  === undefined) {
+					return '';
+				}
+
+				if (org_ptp_nm !== null && org_ptp_nm !== undefined && (org_ptp_nm.length > 1 && /^\d+$/.test(org_ptp_nm))) {
+					org_ptp_nm = null;
+				}
+				return DEALTYPE_CD === "E03" ?
+						spctit1.replace("면적","") + " " + spc1 + "㎡"
+						: spc1 === "0" ? spctit2
+						: spc2 === "0" ? spctit1.replace("면적","") + " " + (org_ptp_nm ? org_ptp_nm : this.replaceLastZero(spc1) + "㎡")
+						: spctit1.replace("면적","") + " " + (org_ptp_nm ? org_ptp_nm + '/' : this.replaceLastZero(spc1)  + '㎡/')  + spctit2.replace("면적","") + " " + this.replaceLastZero(spc2) + "㎡";
+			},
+			pyValue() {
+				const { spctit1, spctit2, spc1_1, spc2_1, spc1, spc2 } = this.info;
+				if (spctit1 === null || spctit1 === undefined) {
+					return '';
+				}
+				return spc1 === '0' ? spctit2.replace("면적", "") + ': ' + Math.round(spc2_1) + '평'
+						: spc2 === '0' ? spctit1.replace("면적", "") + ': ' + Math.round(spc1_1) + '평' : spctit1.replace("면적", "") + '/' + spctit2.replace("면적", "") + ': ' + Math.round(spc1_1) + '/' + Math.round(spc2_1) + '평';
+			},
+			details() {
+				if (this.info.DTL_DESC === undefined) {
+					return '';
+				}
+				let desc = this.info.DTL_DESC.replace(/\n\n\n/gi, '\n');
+
+				const urlRegex = /(https?:\/\/[^\s]+)/g;
+
+				const urls = desc.match(urlRegex);
+
+				if (urls !== null) {
+					const uniqueUrls = urls.filter((element, index) => {
+						return urls.indexOf(element) === index;
+					});
+					if (uniqueUrls !== null) {
+						uniqueUrls.forEach(url => {
+							
+							desc = desc.replaceAll(url, "<a style='color: blue; text-decoration: underline;' href='" + url + "' target='_blank'>" + url + "</a>");
+							
+						});
+					}
+				}
+				return desc.replace(/\n/gi, '<br>').trim();
+			}
+		},
+		mounted() {
+		},
+	}).mount('#app');
+
+	function addNoScroll() {
+		$('body').addClass('noScroll');
+	}
+
+	function removeNoScroll() {
+		$('body').removeClass('noScroll');
+	}
+
+	let saleInfos ={};
+	fetchSaleDetail("38520968");
+
+	function fetchSaleDetail(offer) {
+		if (!offer) {
+			alert('매물정보가 없습니다.');
+			return;
+		}
+		const xmlHttp = new XMLHttpRequest();
+		xmlHttp.onreadystatechange = function () {
+			if (this.status === 200 && this.readyState === 4) {
+				saleInfos = JSON.parse(this.responseText.trim().replace(//g, ''));
+
+				const offerInfo =  saleInfos.mm_json[0];
+				const { PRCS_CD }  = offerInfo;
+				if (PRCS_CD !== '4' && PRCS_CD !== '20') {
+					window.location.href = "sale_close.jsp";
+				}
+
+				app.setInfo(saleInfos.mm_json[0]);
+				if (saleInfos.mm_json_list) {
+					//app.setOffers(saleInfos.mm_json_list);
+				}
+				app.setAdministrationCostInfo(saleInfos.administrationCostInfo);
+				app.setBuiltinOptions(saleInfos.builttin_option);
+
+				const mmUid = saleInfos.mm_json[0].mm_uid;
+
+				if (mmUid !== '21550768') {
+					app.setImages(saleInfos.mm_img_list);
+				}
+
+				loadAgent(offerInfo.user_id);
+				if (offerInfo.MAP_LOC_YN !== "N") {
+					if (offerInfo.kiso_rname === '직거래') {
+						loadDirectOffer();
+					}
+					
+					
+					setMap(37.5129328, 127.0814839);
+					
+					
+				} else {
+					document.querySelector(".naver_map").style.display= 'none';
+				}
+			}
+		};
+		xmlHttp.open('GET', "https://realty.asil.kr/api_asil/data_sale_of_detail.aspx?mm_uid=" + offer);
+		xmlHttp.send();
+	}
+
+	function setLink(title, link, type) {
+		
+		parent.setLink(title, link, type);
+		
+	}
+	function setOutLink(title, link) {
+		
+		parent.setLink(title, link);
+		
+	}
+
+	$(".sizeM").show();
+
+	function clickKakao() {
+		if($('.kkt_frm').is(':visible')) {
+			$('.kkt_frm').hide();
+		}else {
+			$('.kkt_frm').show();
+		}
+	}
+	function hideKakao() {
+		$('.kkt_frm').hide();
+	}
+	function sendKakao() {
+		var name = $('#name').val();
+		var cel1 = $('#cel1').val();
+		var cel2 = $('#cel2').val();
+		var cel3 = $('#cel3').val();
+		if(name.length == 0) { alert('이름을 입력해 주세요.'); return; }
+		if(cel1.length < 3) { alert('휴대폰를 정확히 입력해 주세요.'); return; }
+		if(cel2.length < 3) { alert('휴대폰를 정확히 입력해 주세요.'); return; }
+		if(cel3.length != 4) { alert('휴대폰를 정확히 입력해 주세요.'); return; }
+		var cel = cel1+'-'+cel2+'-'+cel3;
+		var xmlHttp = new XMLHttpRequest();
+		xmlHttp.onreadystatechange = function () {
+			if (this.status === 200 && this.readyState === 4) {
+				alert(this.responseText);
+				$('#name').val('');
+				$('#cel1').val('010');
+				$('#cel2').val('');
+				$('#cel3').val('');
+				hideKakao();
+			}
+		};
+		xmlHttp.open('GET', '/alrimtalk/send_alrimtalk.jsp?tab=4&offer=38520968&cel='+cel+'&name='+encodeURI(name));
+		xmlHttp.send();
+	}
+
+	function loadAgent(user) {
+		try {
+			user = user === null || user === "" ? "-16096" : user;
+
+			const xmlHttp = new XMLHttpRequest();
+			xmlHttp.onreadystatechange = function () {
+				if (this.status === 200 && this.readyState === 4) {
+					console.log(this.responseText);
+					const res = JSON.parse(this.responseText.trim());
+					if (res.result) {
+						//displayAgent(res.agent);
+						const agent = res.agent;
+						app.setAgent(agent);
+
+						if(agent.lat !== '' && agent.lng !== '0.0') {
+							addAgentMarker(agent.lat, agent.lng, agent.photo);
+						}
+					}
+				}
+			};
+			xmlHttp.open('GET', "/json/agentInfo.jsp?user=" + user);
+			xmlHttp.send();
+		} catch (err) {
+			console.error(err);
+		}
+
+	}
+
+	function moveMap(lat, lng) {
+		map.panTo(new naver.maps.LatLng(lat, lng));
+	}
+
+	function openHomepage(tel) {
+		var popup = window.open('https://' + tel + '.asil.kr', 'asil', '');
+	}
+
+	function addAgentMarker(lat, lng, photo) {
+		
+		const mk = new naver.maps.Marker({ position: new naver.maps.LatLng(lat, lng), map: map,
+			icon: {content: ['<span class="mmbrPin sizeS"><img src="'+photo+'?602175434"></span>'].join(''), size: new naver.maps.Size(23, 23), anchor: new naver.maps.Point(11, 13), scaledSize: new naver.maps.Size(23, 23) }
+		});
+		mk.setZIndex(1);
+		
+	}
+
+	function loadDirectOffer() {
+		document.querySelector('#agent').style.display = 'none';
+		document.querySelector('.agent_home_btn').style.display = 'none';
+
+		const xmlHttp = new XMLHttpRequest();
+		xmlHttp.onreadystatechange = function () {
+			if (this.status === 200 && this.readyState === 4) {
+				const data = JSON.parse(this.responseText);
+				if (data.owner_tel !== '') {
+					displayDirectOffer(data.owner_tel);
+				}
+			}
+		};
+		xmlHttp.open("GET", "/json/getDirectOfferInfo.jsp?offer=38520968");
+		xmlHttp.send();
+	}
+
+	function displayDirectOffer(tel) {
+		const agentInfoEl = document.querySelector('.agent_info');
+		const agentHeader = document.querySelector('.agent_header');
+		agentInfoEl.style.padding = 0;
+		agentHeader.textContent = '직거래 정보'
+		let html = '<div>'
+				+ '	<div class="mb-10">등록자 연락처 : ' + tel + '</div>'
+				+ '	<div class="sub-title pl-5 bg-orange text-white mb-5">부동산 직거래시 주의 사항</div>'
+				+ '	<div class="text-xs">'
+				+ '		<div>- 실소유자가 맞는지 확인 필수!</div>'
+				+ '		<div>- 시세 확인</div>'
+				+ '		<div>- 가압류, 근저당 등 확인</div>'
+				+ '		<div>- 집 하자 체크</div>'
+				+ '		<div>- 세입자와 관련된 사항 확인</div>'
+				+ '	</div>'
+				+ '</div>';
+
+		agentInfoEl.innerHTML = html;
+		agentInfoEl.parentElement.classList.add('mb-15');
+	}
+
+	function setMapType(type) {
+		map.setMapTypeId(naver.maps.MapTypeId[type]);
+	}
+
+	//글자크기
+	let fntSize = 11;
+	function wdSetFontSize(objName, ca) {
+		let NextSize = 0;
+		let cssObj;
+		let ObjCnt = document.getElementsByClassName(objName)[0];
+
+		if (ca === 0) {
+			ObjCnt.style.fontSize = "11px";
+			return false;
+		} else {
+			NextSize = fntSize + parseInt(ca);
+			if (NextSize < 11 || NextSize > 14) {
+				alert('기준이상 조절은 불가합니다');
+				return false;
+			}
+			fntSize = NextSize;
+			ObjCnt.style.fontSize = NextSize + "px";
+		}
+		if (ca > 0) {
+			document.querySelector('.sizeS').style.display = 'inline-block';
+			document.querySelector('.sizeB').style.display = 'none';
+		} else {
+			document.querySelector('.sizeS').style.display = 'none';
+			document.querySelector('.sizeB').style.display = 'inline-block';
+		}
+	}
+
+	let isPanoramaInit = false;
+	let position = null;
+	let map = null;
+	
+	function setMap(lat, lng) {
+		if (lat === '' || lng === '') {
+			document.querySelector(".naver_map").style.display = "none";
+			return;
+		}
+
+		if (lat && lng) {
+			position =  new naver.maps.LatLng(lat, lng)
+			const mapOptions = { center: position, zoom: 16 };
+
+			map = new naver.maps.Map('map', mapOptions);
+			// map.setOptions("mapTypeControl", true)
+
+			let marker = new naver.maps.Marker({ position: position, map: map,
+				icon: { url: '/app/images/map_pin.png', size: new naver.maps.Size(19, 24), anchor: new naver.maps.Point(10, 12), scaledSize: new naver.maps.Size(19, 24) }
+			});
+			marker.setZIndex(100);
+			let streetLayer = new naver.maps.StreetLayer();
+
+			let streetBtn = $('#street');
+			streetBtn.on("click", function(e) {
+				e.preventDefault();
+
+				if (streetLayer.getMap()) {
+					app.setPanoramaMode(false);
+					streetLayer.setMap(null);
+				} else {
+					streetLayer.setMap(map);
+				}
+			})
+
+			// 거리뷰 레이어가 변경되면 발생하는 이벤트를 지도로부터 받아 버튼의 상태를 변경합니다.
+			naver.maps.Event.addListener(map, 'streetLayer_changed', function(streetLayer) {
+				if (streetLayer) {
+					streetBtn.text('지도');
+				} else {
+					streetBtn.text('로드뷰');
+					showMap();
+				}
+			});
+
+
+			// 지도를 클릭했을 때 발생하는 이벤트를 받아 파노라마 위치를 갱신합니다. 이때 거리뷰 레이어가 있을 때만 갱신하도록 합니다.
+			naver.maps.Event.addListener(map, 'click', function(e) {
+				if (streetLayer.getMap()) {
+					let latlng = e.coord;
+
+					// 파노라마의 setPosition()은 해당 위치에서 가장 가까운 파노라마(검색 반경 300미터)를 자동으로 설정합니다.
+					if (!isPanoramaInit) {
+						initPanorama();
+					}
+					app.setPanoramaMode(true);
+					setTimeout(function() {
+						pano.setPosition(latlng);
+
+					}, 300);
+
+					$("#map").hide();
+					$("#roadview").show();
+				}
+			});
+		}
+	}
+	
+
+	function showMap() {
+		$("#map").show();
+		$("#roadview").hide();
+	}
+
+	
+	function initPanorama() {
+		setTimeout(function() {
+			pano = new naver.maps.Panorama("roadview", {
+				position: position,
+				size: new naver.maps.Size(window.innerWidth - 32, 320),
+				pov: {
+					pan: -135,
+					tilt: 29,
+					fov: 100
+				},
+				aroundControl: true,
+				aroundControlOptions: {
+					position: naver.maps.Position.LEFT_BOTTOM,
+				}
+			});
+		}, 300);
+
+		isPanoramaInit = true;
+	}
+	
+
+	function closePano() {
+		showMap();
+	}
+
+	function openSale(offer) {
+		const paramsString = window.location.search
+		const searchParams = new URLSearchParams(paramsString);
+		searchParams.set("offer", offer);
+		window.location.href = window.location.href.split("?")[0] + "?" + searchParams.toString();
+	}
+
+	function sendTel(tel) {
+
+		
+		console.log(tel);
+		//$('#tel050').text(tel);
+		$('.mask3').show();
+		var timer = setInterval(function() {
+			clearInterval(timer);
+			$('.mask3').hide();
+		}, 3000);
+		
+	}
+	function sendTelProcess(type, tel) {
+		
+	}
+
+	function sendSms(tel, message) {
+
+		
+		//$('#tel050').text(tel);
+		$('.mask3').show();
+		var timer = setInterval(function() {
+			clearInterval(timer);
+			$('.mask3').hide();
+		}, 3000);
+		
+	}
+
+
+
+	document.querySelector(".report").addEventListener("click", function() {
+		const jsonData = saleInfos.mm_json[0];
+		let form = document.createElement("form");
+		form.setAttribute("charset", "UTF-8");
+		form.setAttribute("method", "Post");  //Post 방식
+		form.setAttribute("target", "falsehood_popup");  //Post 방식
+		//form.setAttribute("action", "https://kiso.tckdigital.com:10090/"); //요청 보낼 주소 (테스트)
+		form.setAttribute("action", "https://landcenter.kiso.or.kr/"); //요청 보낼 주소
+
+		form.appendChild(hiddenField("mbrCorpId", "asil"));       		            <!-- 참여사코드 -->
+		form.appendChild(hiddenField("atclNo", jsonData.kiso_mm_uid));              <!-- 참여사매물번호 -->
+		form.appendChild(hiddenField("cpId", "asil"));          	                <!-- CP ID -->t
+		form.appendChild(hiddenField("cpAtclNo", jsonData.kiso_mm_uid));            <!-- CP 매물번호 -->
+		form.appendChild(hiddenField("bizNo", jsonData.kiso_bizNo));                <!-- 중개업소 사업자번호 -->
+		form.appendChild(hiddenField("rname", jsonData.kiso_rname));                <!-- 중개업소 상호명 -->
+		form.appendChild(hiddenField("rphone", jsonData.kiso_rphone));              <!-- 중개업소 전화번호 -->
+		form.appendChild(hiddenField("raddr", jsonData.kiso_raddr));                <!-- 중개업소 주소 -->
+		form.appendChild(hiddenField("address1", jsonData.kiso_address1));          <!-- 법정동 주소 -->
+		form.appendChild(hiddenField("address2", jsonData.kiso_address2));          <!-- 나머지 주소 -->
+		form.appendChild(hiddenField("atclName", jsonData.kiso_atclName));          <!-- 매물명 -->
+		form.appendChild(hiddenField("atclType", jsonData.kiso_atclType));          <!-- 매물종류 -->
+		form.appendChild(hiddenField("tradeType", jsonData.kiso_tradeType));        <!-- 거래종류 -->
+		form.appendChild(hiddenField("atclExpsYmdt", jsonData.kiso_atclExpsYmdt));  <!-- 노출일시 (시분초 포함) -->
+		form.appendChild(hiddenField("price", jsonData.kiso_price));                <!-- 가격 -->
+		form.appendChild(hiddenField("space", jsonData.kiso_space));                <!-- 면적 -->
+		form.appendChild(hiddenField("articleDetailUrl", window.location.href));                <!-- 매물 상세 API -->
+
+		document.body.appendChild(form);
+
+		
+		const _width = '660';
+		const _height = '350';
+		const _left = Math.ceil(( window.screen.width - _width )/2);
+		const _top = Math.ceil(( window.screen.height - _height )/2);
+
+		const win =  window.open('', 'falsehood_popup', 'width='+ _width +', height='+ _height +', left=' + _left + ', top='+ _top+',scrollbars=yes, resizable=no, toolbars=no, menubar=no');
+
+		if (win === null || typeof (win) === "undefined" || (win.outerHeight === 0) || win.test === "undefined") {
+			alert("팝업 차단 기능이 설정되어있습니다\n\n차단 기능을 해제(팝업허용) 한 후 다시 이용해 주십시오.");
+			if (win) {
+				win.close();
+			}
+			return;
+		}
+		
+
+		form.acceptCharset = "UTF-8";
+		form.submit();
+	});
+
+	function hiddenField(key, val) {
+		let hiddenField = document.createElement("input");
+		hiddenField.setAttribute("type", "hidden");
+		hiddenField.setAttribute("name", key);
+		hiddenField.setAttribute("value", val);
+		return hiddenField;
+	}
+
+	let backButton = document.querySelector(".btn_back");
+	if (backButton) {
+		backButton.addEventListener("click", function() {
+			window.history.back();
+		});
+	}
+
+	function togglePy() {
+		//document.querySelector('.m2').classList.toggle('hide');
+		//document.querySelector('.py').classList.toggle('hide');
+	}
+</script>
+
+</body>
+</html>

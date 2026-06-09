@@ -1,0 +1,1051 @@
+﻿	var m2_min = 0; //평형(70평)
+	var m2_max = 70;
+	var household_min = 5; //세대수(50~1000세대)
+	var household_max = 100;
+	var movein_min = 0; //입주년차 (40년)
+	var movein_max = 40;
+	var price_min = 0; //실거래가격 (50억)
+	var price_max = 500;
+	var py_price_min = 0; //평당가격 (1억5천)
+	var py_price_max = 150;
+	var m_price_min = 0; //매매가격 (50억)
+	var m_price_max = 500;
+	var j_price_min = 0; //전세가격 (20억)
+	var j_price_max = 200;
+	var gap_min = 0; //매매전세갭 (15억)
+	var gap_max = 150;
+	var j_rate_min = 0; //전세가율 (100%)
+	var j_rate_max = 100;
+	var deal_rate_min = 0; //거래회전율 (50%)
+	var deal_rate_max = 50;
+	var land_area_min = 0; //대지지분 (30평)
+	var land_area_max = 30;
+	var floor_area_min = 0; //용적률 (500%)
+	var floor_area_max = 500;
+	var building_area_min = 0; //건폐율 (100%)
+	var building_area_max = 100;
+	var dnaji = '12';
+	
+	// 슬라이더 기본값으로 초기화
+	function resetSliders() {
+		pySlider.noUiSlider.set([0, 70]);
+		householdSlider.noUiSlider.set([50, 1000]);
+		yearSlider.noUiSlider.set([0, 40]);
+		realPriceSlider.noUiSlider.set([0, 50]);
+		pyPriceSlider.noUiSlider.set([0, 15]);
+		mPriceSlider.noUiSlider.set([0, 50]);
+		jPriceSlider.noUiSlider.set([0, 20]);
+		gapSlider.noUiSlider.set([0, 15]);
+		jRateSlider.noUiSlider.set([0, 100]);
+		turnoverRateSlider.noUiSlider.set([0, 50]);
+		landAreaSlider.noUiSlider.set([0, 30]);
+		floorAreaSlider.noUiSlider.set([0, 500]);
+		buildingAreaSlider.noUiSlider.set([0, 100]);
+	}
+	function setMenuTitle(name, title) {
+		if(title.indexOf("~") >= 0 || title.indexOf("0") >= 0 || title.indexOf("1") >= 0 || title.indexOf("2") >= 0 || title.indexOf("3") >= 0 || title.indexOf("4") >= 0 ||  title.indexOf("5") >= 0 || title.indexOf("6") >= 0 || title.indexOf("7") >= 0 || title.indexOf("8") >= 0 || title.indexOf("9") >= 0) {
+			$("#" + name + "_title").html("<span>" + title + "</span>");
+			$("#" + name + "_title").addClass('select');
+		}else {
+			$("#" + name + "_title").html(title);
+			$("#" + name + "_title").removeClass('select');
+		}
+	}
+	function resetAllParameter() {
+		m2_min = 0; //평형(70평)
+		m2_max = 70;
+		household_min = 5; //세대수(50~1000세대)
+		household_max = 100;
+		movein_min = 0; //입주년차 (40년)
+		movein_max = 40;
+		price_min = 0; //실거래가격 (50억)
+		price_max = 500;
+		py_price_min = 0; //평당가격 (15천)
+		py_price_max = 150;
+		m_price_min = 0; //매매가격 (50억)
+		m_price_max = 500;
+		j_price_min = 0; //전세가격 (20억)
+		j_price_max = 200;
+		gap_min = 0; //매매전세갭 (15억)
+		gap_max = 150;
+		j_rate_min = 0; //전세가율 (100%)
+		j_rate_max = 100;
+		deal_rate_min = 0; //거래회전율 (50%)
+		deal_rate_max = 50;
+		land_area_min = 0; //대지지분 (30평)
+		land_area_max = 30;
+		floor_area_min = 0; //용적률 (500%)
+		floor_area_max = 500;
+		building_area_min = 0; //건폐율 (100%)
+		building_area_max = 100;
+		danji = '12';
+		
+		setMenuTitle("m2", "평형");
+		setMenuTitle("household", "50세대 이상");
+		setMenuTitle("movein", "입주년차");
+		setMenuTitle("price", "매매실거래가");
+		setMenuTitle("py_price", "평당가격");
+		setMenuTitle("m_price", "매매가(매물)");
+		setMenuTitle("j_price", "전세가(매물)");
+		setMenuTitle("gap", "매매전세갭");
+		setMenuTitle("j_rate", "전세가율");
+		setMenuTitle("deal_rate", "거래회전율");
+		setMenuTitle("land_area", "대지지분");
+		setMenuTitle("floor_area", "용적률");
+		setMenuTitle("building_area", "건폐율");
+		setMenuTitle("danji", "매물전체");
+		
+		resetSliders();
+		
+		//하단 슬라이드바/클릭버튼 초기화
+		$('.filter_popup > ul > li').removeClass('check');
+		
+		updateMap();
+	}
+	
+	function resetParameter(type) {
+		switch(type) {
+			case 'danji':
+				danji = '12';
+				setMenuTitle("danji", "매물전체");
+				break;
+				
+			case 'm2':
+				m2_min = 0; //평형(70평)
+				m2_max = 70;
+				pySlider.noUiSlider.set([0, 70]);
+				setMenuTitle("m2", "평형");
+				break;
+				
+			case 'household':
+				household_min = 5; //세대수(50~1000세대)
+				household_max = 100;
+				householdSlider.noUiSlider.set([50, 1000]);
+				setMenuTitle("household", "50세대 이상");
+				break;	
+				
+			case 'movein':
+				movein_min = 0; //입주년차 (40년)
+				movein_max = 40;
+				yearSlider.noUiSlider.set([0, 40]);
+				setMenuTitle("movein", "입주년차");
+				break;	
+				
+			case 'price':
+				price_min = 0; //실거래가격 (50억)
+				price_max = 500;
+				realPriceSlider.noUiSlider.set([0, 50]);
+				setMenuTitle("price", "매매실거래가");
+				break;
+				
+			case 'py_price':
+				py_price_min = 0; //평당가격 (15천)
+				py_price_max = 150;
+				pyPriceSlider.noUiSlider.set([0, 15]);
+				setMenuTitle("py_price", "평당가격");
+				break;
+				
+			case 'm_price':
+				m_price_min = 0; //매매가격 (50억)
+				m_price_max = 500;
+				mPriceSlider.noUiSlider.set([0, 50]);
+				setMenuTitle("m_price", "매매가(매물)");
+				break;	
+				
+			case 'j_price':
+				j_price_min = 0; //전세가격 (20억)
+				j_price_max = 200;
+				jPriceSlider.noUiSlider.set([0, 20]);
+				setMenuTitle("j_price", "전세가(매물)");
+				break;	
+				
+			case 'gap':
+				gap_min = 0; //매매전세갭 (15억)
+				gap_max = 150;
+				gapSlider.noUiSlider.set([0, 15]);
+				setMenuTitle("gap", "매매전세갭");
+				break;	
+				
+			case 'j_rate':
+				j_rate_min = 0; //전세가율 (100%)
+				j_rate_max = 100;
+				jRateSlider.noUiSlider.set([0, 100]);
+				setMenuTitle("j_rate", "전세가율");
+				break;	
+				
+			case 'deal_rate':
+				deal_rate_min = 0; //거래회전율 (50%)
+				deal_rate_max = 50;
+				turnoverRateSlider.noUiSlider.set([0, 50]);
+				setMenuTitle("deal_rate", "거래회전율");
+				break;	
+				
+			case 'land_area':
+				land_area_min = 0; //대지지분 (30평)
+				land_area_max = 30;
+				landAreaSlider.noUiSlider.set([0, 30]);
+				setMenuTitle("land_area", "대지지분");
+				break;	
+				
+			case 'floor_area':	
+				floor_area_min = 0; //용적률 (500%)
+				floor_area_max = 500;
+				floorAreaSlider.noUiSlider.set([0, 500]);
+				setMenuTitle("floor_area", "용적률");
+				break;	
+				
+			case 'building_area':
+				building_area_min = 0; //건폐율 (100%)
+				building_area_max = 100;
+				buildingAreaSlider.noUiSlider.set([0, 100]);
+				setMenuTitle("building_area", "건폐율");
+				break;	
+		
+			case 'all':
+				resetParameterAll();
+				return;	
+		}
+
+		$('#' + type + '_range li').removeClass('check')
+			.first().addClass('check');
+
+		updateMap();
+	}
+	
+	var pyTitle = '';
+	var houseHoldTitle = '';
+	// 평 슬라이드
+	var pySlider = document.getElementById('pySlider');
+	
+	var pySuffixFormat = wNumb({suffix: '평', decimals: 0});
+	var houseHoldSuffixFormat = wNumb({suffix: '세대', decimals: 0});
+	var yearSuffixFormat = wNumb({suffix: '년', decimals: 0});
+	var ukSuffixFormat = wNumb({suffix: '억', decimals: 0});
+	var chSuffixFormat = wNumb({suffix: '천', decimals: 0});
+	var pSuffixFormat = wNumb({suffix: '%', decimals: 0});
+	
+	noUiSlider.create(pySlider, {
+		range:{'min': 0, 'max': 70},
+		start:[0, 70],
+		step: 1,
+		connect: true,
+		pips: {
+			mode: 'values',
+			values: [0, 10, 20, 30, 40, 50, 60, 70],
+			density: 10,
+			format: pySuffixFormat
+		}
+	});
+	
+	pySlider.noUiSlider.on('update', function(values, handle) {
+		var title = "";
+		if (handle === 0) {
+			m2_min = +values[handle];
+		} else {
+			m2_max = +values[handle];
+		}
+		if (pyTitle === '') {
+			if (m2_min === 0 && m2_max === 70) {
+				title = "평형"
+			} else if (m2_min === 70) {
+				title = "70평대~"
+			} else if (m2_min === 0) {
+				title = m2_max + "평이하";
+			} else if (m2_max === 70) {
+				title = m2_min + "평이상"
+			} else {
+				title = m2_min + "~" + m2_max +"평";
+			}
+			setMenuTitle("m2", title);
+		}
+	});
+	
+	pySlider.noUiSlider.on('change', function(values){
+		setRange_m2(Math.floor(values[0]), Math.floor(values[1]), '');
+	});
+	
+	function setDanji(sDanji, title) {
+		if (sDanji !== '') {
+			danji = sDanji;
+			setMenuTitle("danji", title);
+		}
+
+		$('#danji_range li').removeClass('check');
+		var nth = 0;
+		if (sDanji == '12') nth = 1;
+		else if (sDanji == '1') nth = 2;
+		else if (sDanji == '2') nth = 3;
+
+		if(nth > 0) { $('#danji_range li:nth-child('+nth+')').addClass('check'); }
+		setDanjiMap(danji);
+	}
+	
+	function setRange_m2(min, max, title) {
+		if (title !== '') {
+			pyTitle = title;
+			setMenuTitle("m2", pyTitle);
+			pySlider.noUiSlider.set([min, max]);
+			pyTitle = '';
+		}
+		$('#m2_range li').removeClass('check');
+		var nth = 0;
+		if(min == 0 && max == 70) {		nth=1;
+		}else if(min == 10 && max == 19) {	nth=2;
+		}else if(min == 20 && max == 29) {	nth=3;
+		}else if(min == 30 && max == 39) {	nth=4;
+		}else if(min == 40 && max == 49) {	nth=5;
+		}else if(min == 50 && max == 59) {	nth=6;
+		}else if(min == 60 && max == 69) {	nth=7;
+		}else if(min == 70 && max == 70) {	nth=8;
+		}
+		if(nth > 0) { $('#household_range li:nth-child('+nth+')').addClass('check'); }
+		updateMap();
+
+		setCookie2020('bds_m2_min', '', min+'');
+		setCookie2020('bds_m2_max', '', max+'');
+	}
+	
+	// 세대수 슬라이더
+	var houseHoldSlider = document.getElementById('householdSlider');
+	noUiSlider.create(houseHoldSlider, {
+		range:{'min':0, 'max': 1000},
+		// range:{'min':[0], '5%':[50, 1000], '10%':[10, 1000], '20%':[20, 1000],'30%':[300, 1000],'50%':[500, 1000],'max': 1000},
+		start:[50, 1000],
+		step: 10,
+		connect: true,
+		pips: {
+			mode:'values',
+			values: [0, 200, 400, 600, 800, 1000],
+			density: 200,
+			format: houseHoldSuffixFormat
+		}
+	});
+	
+	houseHoldSlider.noUiSlider.on('update', function(values, handle) {
+		var title = "";
+		if (handle === 0) {
+			household_min = +values[handle] / 10;
+		} else {
+			household_max = +values[handle] / 10;
+		}
+		if(household_min === 0 && household_max === 100) {
+			title = "세대수";
+		} else if(household_min === 100) {
+			title = "1000세대이상";
+		} else if(household_min === 0) {
+			title = household_max + "0세대이하";
+		} else if(household_max === 100) {
+			title = household_min + "0세대이상";
+		} else {
+			title = household_min + "0~" + household_max +"0세대";
+		}
+		setMenuTitle("household", title);
+	});
+	
+	houseHoldSlider.noUiSlider.on('change', function(values){
+		setRange_household(Math.floor(values[0]/10), Math.floor(values[1]/10), '');
+	});
+	
+	function setRange_household(min, max, title) {
+		if(title !== '') {
+			householdSlider.noUiSlider.set([min * 10, max*10]);
+		}
+		$('#household_range li').removeClass('check');
+		var nth = 0;
+		if(min == 0 && max == 100) {		nth=1;
+		}else if(min == 5 && max == 100) {	nth=2;
+		}else if(min == 10 && max == 100) {	nth=3;
+		}else if(min == 20 && max == 100) {	nth=4;
+		}else if(min == 30 && max == 100) {	nth=5;
+		}else if(min == 50 && max == 100) {	nth=6;
+		}else if(min == 100 && max == 100) {	nth=7;
+		}
+		if(nth > 0) { $('#household_range li:nth-child('+nth+')').addClass('check'); }
+		updateMap();
+
+		setCookie2020('bds_household_min', '', min+'');
+		setCookie2020('bds_household_max', '', max+'');
+	}
+	
+	// 입주년차 슬라이더
+	var yearSlider = document.getElementById('yearSlider');
+	noUiSlider.create(yearSlider, {
+		range:{'min': 0, 'max': 40},
+		start:[0, 40],
+		step:1,
+		connect: true,
+			pips: {
+			mode:'values',
+			values: [0, 10, 20, 30, 40],
+			density: 10,
+			format: yearSuffixFormat
+		}
+	});
+	
+	yearSlider.noUiSlider.on('update', function(values, handle) {
+		var title = "";
+		if (handle === 0) {
+		movein_min = Math.floor(+values[handle]);
+		} else {
+		movein_max = Math.floor(+values[handle]);
+		}
+		if(movein_min === 0 && movein_max === 40) {
+			title = "입주년차";
+		} else if(movein_min === 40) {
+			title = "입주 40년이상";
+		} else if(movein_min === 0) {
+			title = "입주 " + movein_max + "년이하";
+		} else if(movein_max === 40) {
+			title = "입주 " + movein_min + "년이상";
+		} else {
+			title = "입주 " + movein_min + "~" + movein_max +"년";
+		}
+		setMenuTitle("movein", title);
+	});
+	
+	yearSlider.noUiSlider.on('change', function(values){
+		setRange_movein(Math.floor(values[0]), Math.floor(values[1]), '');
+	});
+	
+	function setRange_movein(min, max, title) {
+		if(title !== '') {
+			yearSlider.noUiSlider.set([min, max]);
+		}
+		$('#movein_range li').removeClass('check');
+		var nth = 0;
+		if(min == 0 && max == 40) {		nth=1;
+		}else if(min == 0 && max == 2) {	nth=2;
+		}else if(min == 0 && max == 3) {	nth=3;
+		}else if(min == 0 && max == 5) {	nth=4;
+		}else if(min == 0 && max == 10) {	nth=5;
+		}else if(min == 0 && max == 20) {	nth=6;
+		}else if(min == 5 && max == 40) {	nth=7;
+		}else if(min == 10 && max == 40) {	nth=8;
+		}else if(min == 20 && max == 40) {	nth=9;
+		}else if(min == 30 && max == 40) {	nth=10;
+		}else if(min == 40 && max == 40) {	nth=11;
+		}
+		if(nth > 0) { $('#movein_range li:nth-child('+nth+')').addClass('check'); }
+		updateMap();
+	}
+	
+	// 실거래가
+	var realPriceSlider = document.getElementById('realPriceSlider');
+	noUiSlider.create(realPriceSlider, {
+		range: {'min': 0, 'max': 50},
+		start:[0, 50],
+		step:0.1,
+		connect: true,
+		pips: {
+			mode:'values',
+			values: [0, 10, 20, 30, 40, 50],
+			density: 10,
+			format: ukSuffixFormat
+		}
+	});
+	
+	realPriceSlider.noUiSlider.on('update', function(values, handle) {
+		var title = "";
+		if (handle === 0) {
+			price_min = Math.floor(+values[handle]*10);
+		} else {
+			price_max = Math.floor(+values[handle]*10);
+		}
+		if(price_min === 0 && price_max === 500) {
+			title = "매매실거래가";
+		} else if(price_min === 500) {
+			title = "실거래 50억이상";
+		} else if(price_min === 0) {
+			title = "실거래 " + price_max/10 + "억이하";
+		} else if(price_max === 500) {
+			title = "실거래 " + price_min/10 + "억이상";
+		} else {
+			title = "실거래 " + (price_min/10) + "~" + (price_max/10) +"억";
+		}
+		setMenuTitle("price", title);
+	});
+	
+	realPriceSlider.noUiSlider.on('change', function(values){
+		setRange_price(Math.floor(values[0]*10), Math.floor(values[1]*10), '');
+	});
+	
+	function setRange_price(min, max, title) {
+		if(title !== '') {
+			realPriceSlider.noUiSlider.set([min/10, max/10]);
+		}
+		$('#price_range li').removeClass('check');
+		var nth = 0;
+		if(min == 0 && max == 500) {		nth=1;
+		}else if(min == 20 && max == 30) {	nth=2;
+		}else if(min == 30 && max == 50) {	nth=3;
+		}else if(min == 50 && max == 80) {	nth=4;
+		}else if(min == 80 && max == 100) {	nth=5;
+		}else if(min == 100 && max == 150) {	nth=6;
+		}else if(min == 30 && max == 500) {	nth=7;
+		}else if(min == 50 && max == 500) {	nth=8;
+		}else if(min == 60 && max == 500) {	nth=9;
+		}else if(min == 80 && max == 500) {	nth=10;
+		}else if(min == 100 && max == 500) {	nth=11;
+		}else if(min == 200 && max == 500) {	nth=12;
+		}else if(min == 300 && max == 500) {	nth=13;
+		}
+		if(nth > 0) { $('#price_range li:nth-child('+nth+')').addClass('check'); }
+		updateMap();
+	}
+	
+	// 평당가격
+	var pyPriceSlider = document.getElementById('pyPriceSlider');
+	noUiSlider.create(pyPriceSlider, {
+		range:{'min':0, 'max': 15},
+		start:[0, 15],
+		step: 0.1,
+		connect: true,
+		pips: {
+			mode:'values',
+			values: [0, 5, 10, 15],
+			density: 1,
+			format: chSuffixFormat
+		}
+	});
+	
+	pyPriceSlider.noUiSlider.on('update', function(values, handle) {
+		var title = "";
+		if (handle === 0) {
+			py_price_min = Math.floor(+values[handle]*10);
+		} else {
+			py_price_max = Math.floor(+values[handle]*10);
+		}
+		
+		if (py_price_min === 0 && py_price_max === 150) { title = "평당가격";
+		} else if (py_price_min === 150) {				        title = "평당 1억5천이상";
+		} else if (py_price_min === 0) {
+			if(py_price_max < 100) {
+				title = "평당 " + (py_price_max/10) + "천이하";
+			}else {
+				title = "평당 " + (py_price_max/100) + "억이하";
+			}
+		} else if (py_price_max === 150) {
+			if(py_price_min < 100) {
+				title = "평당 " + (py_price_min/10) + "천이상";
+			}else {
+				title = "평당 " + (py_price_min/100) + "억이상";
+			}
+		} else {
+			title = "평당 " + (py_price_min/10) + "~" + (py_price_max/10) +"천";
+		}
+		setMenuTitle("py_price", title);
+	});
+		
+	pyPriceSlider.noUiSlider.on('change', function(values){
+		setRange_py_price(Math.floor(values[0]*10), Math.floor(values[1]*10), '');
+	});
+	
+	function setRange_py_price(min, max, title) {
+		if(title !== '') {
+			pyPriceSlider.noUiSlider.set([min/10, max/10]);
+		}
+		$('#py_price_range li').removeClass('check');
+		var nth = 0;
+		if(min == 0 && max == 150) {		nth=1;
+		}else if(min == 5 && max == 10) {	nth=2;
+		}else if(min == 10 && max == 15) {	nth=3;
+		}else if(min == 15 && max == 20) {	nth=4;
+		}else if(min == 20 && max == 30) {	nth=5;
+		}else if(min == 33 && max == 40) {	nth=6;
+		}else if(min == 43 && max == 50) {	nth=7;
+		}else if(min == 53 && max == 60) {	nth=8;
+		}else if(min == 63 && max == 70) {	nth=9;
+		}else if(min == 10 && max == 150) {	nth=10;
+		}else if(min == 20 && max == 150) {	nth=11;
+		}else if(min == 30 && max == 150) {	nth=12;
+		}else if(min == 40 && max == 150) {	nth=13;
+		}else if(min == 50 && max == 150) {	nth=14;
+		}else if(min == 60 && max == 150) {	nth=15;
+		}
+		if(nth > 0) { $('#py_price_range li:nth-child('+nth+')').addClass('check'); }
+		updateMap();
+	}
+	
+	// 매매가
+	var mPriceSlider = document.getElementById('mPriceSlider');
+	noUiSlider.create(mPriceSlider, {
+		range:{'min':0, 'max': 50},
+		start:[0, 50],
+		step:0.1,
+		connect: true,
+		pips: {
+			mode:'values',
+			values: [0, 10, 20, 30, 40, 50],
+			density: 10,
+			format: ukSuffixFormat
+		}
+	});
+	
+	mPriceSlider.noUiSlider.on('update', function(values, handle) {
+		var title = "";
+		if (handle === 0) {
+			m_price_min = Math.floor(+values[handle]*10);
+		} else {
+			m_price_max = Math.floor(+values[handle]*10);
+		}
+		
+		if (m_price_min === 0 && m_price_max === 500) { title = "매매가(매물)";
+		} else if(m_price_min === 500) {		title = "매매 50억이상";
+		} else if(m_price_min === 0) {			title = "매매 " + (m_price_max/10) + "억이하";
+		} else if(m_price_max === 500) {		title = "매매 " + (m_price_min/10) + "억이상";
+		} else {					title = "매매 " + (m_price_min/10) + "~" + (m_price_max/10) +"억";
+		}
+		setMenuTitle("m_price", title);
+	});
+	
+	mPriceSlider.noUiSlider.on('change', function(values){
+		setRange_m_price(Math.floor(values[0]*10), Math.floor(values[1]*10), '');
+	});
+	
+	function setRange_m_price(min, max, title) {
+		if(title !== '') {
+			mPriceSlider.noUiSlider.set([min/10, max/10]);
+		}
+		$('#m_price_range li').removeClass('check');
+		var nth = 0;
+		if(min == 0 && max == 500) {		nth=1;
+		}else if(min == 20 && max == 30) {	nth=2;
+		}else if(min == 30 && max == 50) {	nth=3;
+		}else if(min == 50 && max == 80) {	nth=4;
+		}else if(min == 80 && max == 100) {	nth=5;
+		}else if(min == 100 && max == 150) {	nth=6;
+		}else if(min == 30 && max == 500) {	nth=7;
+		}else if(min == 50 && max == 500) {	nth=8;
+		}else if(min == 60 && max == 500) {	nth=9;
+		}else if(min == 80 && max == 500) {	nth=10;
+		}else if(min == 100 && max == 500) {	nth=11;
+		}else if(min == 200 && max == 500) {	nth=12;
+		}else if(min == 300 && max == 500) {	nth=13;
+		}
+		if(nth > 0) { $('#m_price_range li:nth-child('+nth+')').addClass('check'); }
+		updateMap();
+	}
+	
+	// 전세가
+	var jPriceSlider = document.getElementById('jPriceSlider');
+	noUiSlider.create(jPriceSlider, {
+		range:{'min':0, 'max': 20},
+		start:[0, 20],
+		step: 0.1,
+		connect: true,
+		pips: {
+			mode:'values',
+			values: [0, 4, 8, 12, 16, 20],
+			density: 4,
+			format: ukSuffixFormat
+		}
+	});
+	
+	jPriceSlider.noUiSlider.on('update', function(values, handle) {
+		var title = "";
+		if (handle === 0) {
+			j_price_min = Math.floor(+values[handle]*10);
+		} else {
+			j_price_max = Math.floor(+values[handle]*10);
+		}
+		
+		if (j_price_min == 0 && j_price_max == 200) {	title = "전세가(매물)";
+		} else if (j_price_min == 200) {		title = "전세 20억이상";
+		} else if (j_price_min == 0) {			title = "전세 " + (j_price_max/10) + "억이하";
+		} else if (j_price_max == 200) {		title = "전세 " + (j_price_min/10) + "억이상";
+		} else {					title = "전세 " + (j_price_min/10) + "~" + (j_price_max/10) +"억";
+		}
+		setMenuTitle("j_price", title);
+	});
+	
+	jPriceSlider.noUiSlider.on('change', function(values){
+		setRange_j_price(Math.floor(values[0]*10), Math.floor(values[1]*10), '');
+	});
+	
+	function setRange_j_price(min, max, title) {
+		if(title !== '') {
+			jPriceSlider.noUiSlider.set([min/10, max/10]);
+		}
+		$('#j_price_range li').removeClass('check');
+		var nth = 0;
+		if(min == 0 && max == 200) {		nth=1;
+		}else if(min == 20 && max == 30) {	nth=2;
+		}else if(min == 30 && max == 50) {	nth=3;
+		}else if(min == 50 && max == 80) {	nth=4;
+		}else if(min == 80 && max == 100) {	nth=5;
+		}else if(min == 100 && max == 150) {	nth=6;
+		}else if(min == 30 && max == 200) {	nth=7;
+		}else if(min == 50 && max == 200) {	nth=8;
+		}else if(min == 60 && max == 200) {	nth=9;
+		}else if(min == 80 && max == 200) {	nth=10;
+		}else if(min == 100 && max == 200) {	nth=11;
+		}else if(min == 200 && max == 200) {	nth=12;
+		}
+		if(nth > 0) { $('#j_price_range li:nth-child('+nth+')').addClass('check'); }
+		updateMap();
+	}
+	
+	// 매매전세갭
+	var gapSlider = document.getElementById('gapSlider');
+	noUiSlider.create(gapSlider, {
+		range:{'min':0, 'max': 15},
+		start:[0, 15],
+		step:0.1,
+		connect: true,
+		pips: {
+			mode:'values',
+			values: [0, 3, 6, 9, 12, 15],
+			density: 1,
+			format: ukSuffixFormat
+		}
+	});
+	
+	gapSlider.noUiSlider.on('update', function(values, handle) {
+		var title = "";
+		if (handle === 0) {
+			gap_min = Math.floor(+values[handle]*10);
+		} else {
+			gap_max = Math.floor(+values[handle]*10);
+		}
+		
+		if (gap_min === 0 && gap_max === 150) {	title = "매매전세갭";
+		} else if (gap_min === 150) {			title = "갭 15억이상";
+		} else if (gap_min === 0) {
+			if(gap_max < 10) {
+				title = "갭 " + gap_max + "천이하";
+			}else {
+				title = "갭 " + (gap_max/10) + "억이하";
+			}
+		} else if (gap_max === 150) {
+			if(gap_min < 10) {
+				title = "갭 " + gap_min + "천이상";
+			}else {
+				title = "갭 " + (gap_min/10) + "억이상";
+			}
+		} else {			title = "갭 " + (gap_min/10) + "~" + (gap_max/10) +"억";
+		}
+		setMenuTitle("gap", title);
+	});
+		
+	gapSlider.noUiSlider.on('change', function(values){
+		setRange_gap(Math.floor(values[0]*10), Math.floor(values[1]*10), '');
+	});
+	
+	function setRange_gap(min, max, title) {
+		if(title !== '') {
+			gapSlider.noUiSlider.set([min/10, max/10]);
+		}
+		$('#gap_range li').removeClass('check');
+		var nth = 0;
+		if(min == 0 && max == 150) {		nth=1;
+		}else if(min == 0 && max == 1) {	nth=2;
+		}else if(min == 0 && max == 2) {	nth=3;
+		}else if(min == 0 && max == 3) {	nth=4;
+		}else if(min == 0 && max == 4) {	nth=5;
+		}else if(min == 0 && max == 5) {	nth=6;
+		}else if(min == 0 && max == 6) {	nth=7;
+		}else if(min == 0 && max == 7) {	nth=8;
+		}else if(min == 0 && max == 10) {	nth=9;
+		}else if(min == 0 && max == 20) {	nth=10;
+		}else if(min == 0 && max == 30) {	nth=11;
+		}else if(min == 0 && max == 50) {	nth=12;
+		}else if(min == 150 && max == 150) {	nth=13;
+		}
+		if(nth > 0) { $('#gap_range li:nth-child('+nth+')').addClass('check'); }
+		updateMap();
+	}
+	
+	// 전세가율
+	var jRateSlider = document.getElementById('jRateSlider');
+	noUiSlider.create(jRateSlider, {
+		range:{'min':0, 'max': 100},
+		start:[0, 100],
+		step:1,
+		connect: true,
+		pips: {
+			mode:'values',
+			values: [0, 20 , 40, 60, 80, 100],
+			density: 20,
+			format: pSuffixFormat
+		}
+	});
+	
+	jRateSlider.noUiSlider.on('update', function(values, handle) {
+		var title = "";
+		if (handle === 0) {
+			j_rate_min = Math.floor(+values[handle]);
+		} else {
+			j_rate_max = Math.floor(+values[handle]);
+		}
+		
+		if (j_rate_min === 0 && j_rate_max === 100) {	title = "전세가율";
+		} else if (j_rate_min === 100) {		title = "전세가율 100%이상";
+		} else if (j_rate_min === 0) {			title = "전세가율 " + j_rate_max + "%이하";
+		} else if (j_rate_max === 100) {		title = "전세가율 " + j_rate_min + "%이상";
+		} else {					title = "전세가율 " + j_rate_min + "~" + j_rate_max +"%";
+		}
+		setMenuTitle("j_rate", title);
+	});
+		
+	jRateSlider.noUiSlider.on('change', function(values){
+		setRange_j_rate(Math.floor(values[0]), Math.floor(values[1]), '');
+	});
+		
+	function setRange_j_rate(min, max, title) {
+		if(title !== '') {
+			jRateSlider.noUiSlider.set([min, max]);
+		}
+		$('#j_rate_range li').removeClass('check');
+		var nth = 0;
+		if(min == 0 && max == 100) {		nth=1;
+		}else if(min == 50 && max == 100) {	nth=2;
+		}else if(min == 60 && max == 100) {	nth=3;
+		}else if(min == 70 && max == 100) {	nth=4;
+		}else if(min == 80 && max == 100) {	nth=5;
+		}else if(min == 0 && max == 50) {	nth=6;
+		}else if(min == 0 && max == 60) {	nth=7;
+		}else if(min == 0 && max == 70) {	nth=8;
+		}else if(min == 0 && max == 80) {	nth=9;
+		}
+		if(nth > 0) { $('#j_rate_range li:nth-child('+nth+')').addClass('check'); }
+		updateMap();
+	}
+	
+	
+	// 거래회전율
+	var turnoverRateSlider = document.getElementById('turnoverRateSlider');
+	noUiSlider.create(turnoverRateSlider, {
+		range:{'min':0, 'max': 50},
+		start:[0, 50],
+		step: 1,
+		connect: true,
+		pips: {
+			mode:'values',
+			values: [0, 10, 20, 30, 40, 50],
+			density: 10,
+			format: pSuffixFormat
+		}
+	});
+	
+	turnoverRateSlider.noUiSlider.on('update', function(values, handle) {
+		var title = "";
+		if (handle === 0) {
+			deal_rate_min = Math.floor(+values[handle]);
+		} else {
+			deal_rate_max = Math.floor(+values[handle]);
+		}
+		
+		if (deal_rate_min === 0 && deal_rate_max === 50) {	title = "거래회전율";
+		} else if (deal_rate_min === 50) {			 title = "거래회전율 50%이상";
+		} else if (deal_rate_min === 0) {			title = "거래회전율 " + deal_rate_max + "%이하";
+		} else if (deal_rate_max === 50) {			title = "거래회전율 " + deal_rate_min + "%이상";
+		} else {						title = "거래회전율 " + deal_rate_min + "~" + deal_rate_max +"%";
+		}
+		
+		setMenuTitle("deal_rate", title);
+	});
+		
+	turnoverRateSlider.noUiSlider.on('change', function(values){
+		setRange_deal_rate(Math.floor(values[0]), Math.floor(values[1]), '');
+	});
+	
+	function setRange_deal_rate(min, max, title) {
+		if(title !== '') {
+			turnoverRateSlider.noUiSlider.set([min, max]);
+		}
+		$('#deal_rate_range li').removeClass('check');
+		var nth = 0;
+		if(min == 0 && max == 50) {		nth=1;
+		}else if(min == 5 && max == 50) {	nth=2;
+		}else if(min == 10 && max == 50) {	nth=3;
+		}else if(min == 20 && max == 50) {	nth=4;
+		}else if(min == 30 && max == 50) {	nth=5;
+		}else if(min == 40 && max == 50) {	nth=6;
+		}else if(min == 50 && max == 50) {	nth=7;
+		}
+		if(nth > 0) { $('#deal_rate_range li:nth-child('+nth+')').addClass('check'); }
+		updateMap();
+	}
+
+	
+	// 대지지분
+	var landAreaSlider = document.getElementById('landAreaSlider');
+	noUiSlider.create(landAreaSlider, {
+		range:{'min':0, 'max': 30},
+		start:[0, 30],
+		step: 1,
+		connect: true,
+		pips: {
+			mode:'values',
+			values: [0, 5, 10, 15, 20, 25, 30],
+			density: 5,
+			format: pySuffixFormat
+		}
+	});
+
+	landAreaSlider.noUiSlider.on('update', function(values, handle) {
+		var title = "";
+		if(handle === 0) {
+			land_area_min = Math.floor(+values[handle]);
+		} else {
+			land_area_max = Math.floor(+values[handle]);
+		}
+		
+		if(land_area_min === 0 && land_area_max === 30) {	title = "대지지분";
+		} else if(land_area_min === 30) {			title = "대지지분 30평이상";
+		} else if(land_area_min === 0) {			title = "대지지분 " + land_area_max + "평이하";
+		} else if(land_area_max === 30) {			title = "대지지분 " + land_area_min + "평이상";
+		} else {						title = "대지지분 " + land_area_min + "~" + land_area_max +"평";
+		}
+		
+		setMenuTitle("land_area", title);
+	});
+
+	landAreaSlider.noUiSlider.on('change', function(values){
+		setRange_land_area(Math.floor(values[0]), Math.floor(values[1]), '');
+	});
+	
+	function setRange_land_area(min, max, title) {
+		if(title !== '') {
+			landAreaSlider.noUiSlider.set([min, max]);
+		}
+		$('#land_area_range li').removeClass('check');
+		var nth = 0;
+		if(min == 0 && max == 30) {		nth=1;
+		}else if(min == 5 && max == 30) {	nth=2;
+		}else if(min == 10 && max == 30) {	nth=3;
+		}else if(min == 15 && max == 30) {	nth=4;
+		}else if(min == 20 && max == 30) {	nth=5;
+		}else if(min == 25 && max == 30) {	nth=6;
+		}else if(min == 30 && max == 30) {	nth=7;
+		}
+		if(nth > 0) { $('#land_area_range li:nth-child('+nth+')').addClass('check'); }
+		updateMap();
+	}
+	
+	
+	// 용적률
+	var floorAreaSlider = document.getElementById('floorAreaSlider');
+	noUiSlider.create(floorAreaSlider, {
+		range:{'min':0, 'max': 500},
+		start:[0, 500],
+		step: 1,
+		connect: true,
+		pips: {
+			mode:'values',
+			values: [0, 100, 200, 300, 400, 500],
+			density: 10,
+			format: pSuffixFormat
+		}
+	});
+
+	floorAreaSlider.noUiSlider.on('update', function(values, handle) {
+		var title = "";
+		if(handle === 0) {
+			floor_area_min = Math.floor(+values[handle]);
+		} else {
+			floor_area_max = Math.floor(+values[handle]);
+		}
+		
+		if(floor_area_min === 0 && floor_area_max === 500) {		title = "용적률";
+		} else if(floor_area_min === 500) {				title = "용적률 500%이상";
+		} else if(floor_area_min === 0) {			   	title = "용적률 " + floor_area_max + "%이하";
+		} else if(floor_area_max === 500) {				title = "용적률 " + floor_area_min + "%이상";
+		} else {							title = "용적률 " + floor_area_min + "~" + floor_area_max +"%";
+		}
+		
+		setMenuTitle("floor_area", title);
+	});
+
+	floorAreaSlider.noUiSlider.on('change', function(values){
+		setRange_floor_area(Math.floor(values[0]), Math.floor(values[1]), '');
+	});
+	
+	function setRange_floor_area(min, max, title) {
+		if(title !== '') {
+			floorAreaSlider.noUiSlider.set([min, max]);
+		}
+		$('#floor_area_range li').removeClass('check');
+		var nth = 0;
+		if(min == 0 && max == 500) {		nth=1;
+		}else if(min == 0 && max == 100) {	nth=2;
+		}else if(min == 100 && max == 150) {	nth=3;
+		}else if(min == 150 && max == 200) {	nth=4;
+		}else if(min == 200 && max == 250) {	nth=5;
+		}else if(min == 250 && max == 300) {	nth=6;
+		}else if(min == 300 && max == 500) {	nth=7;
+		}
+		if(nth > 0) { $('#floor_area_range li:nth-child('+nth+')').addClass('check'); }
+		updateMap();
+	}
+
+	
+	// 건폐율
+	var buildingAreaSlider = document.getElementById('buildingAreaSlider');
+	noUiSlider.create(buildingAreaSlider, {
+		range:{'min':0, 'max': 100},
+		start:[0, 100],
+		step: 1,
+		connect: true,
+		pips: {
+			mode:'values',
+			values: [0, 20, 40, 60, 80, 100],
+			density: 10,
+			format: pSuffixFormat
+		}
+	});
+
+	buildingAreaSlider.noUiSlider.on('update', function(values, handle) {
+		var title = "";
+		if(handle === 0) {
+			building_area_min = Math.floor(+values[handle]);
+		} else {
+			building_area_max = Math.floor(+values[handle]);
+		}
+		
+		if(building_area_min === 0 && building_area_max === 100) {	title = "건폐율";
+		} else if(building_area_min === 100) {									title = "건폐율 100%이상";
+		} else if(building_area_min === 0) {			   						title = "건폐율 " + building_area_max + "%이하";
+		} else if(building_area_max === 100) {									title = "건폐율 " + building_area_min + "%이상";
+		} else {																		title = "건폐율 " + building_area_min + "~" + building_area_max +"%";
+		}
+		
+		setMenuTitle("building_area", title);
+	});
+
+	buildingAreaSlider.noUiSlider.on('change', function(values){
+		setRange_building_area(Math.floor(values[0]), Math.floor(values[1]), '');
+	});
+	
+	function setRange_building_area(min, max, title) {
+		if(title !== '') {
+			buildingAreaSlider.noUiSlider.set([min, max]);
+		}
+		$('#building_area_range li').removeClass('check');
+		var nth = 0;
+		if(min == 0 && max == 100) {		nth=1;
+		}else if(min == 0 && max == 10) {	nth=2;
+		}else if(min == 0 && max == 20) {	nth=3;
+		}else if(min == 0 && max == 30) {	nth=4;
+		}else if(min == 0 && max == 40) {	nth=5;
+		}else if(min == 0 && max == 50) {	nth=6;
+		}else if(min == 50 && max == 100) {	nth=7;
+		}
+		if(nth > 0) { $('#building_area_range li:nth-child('+nth+')').addClass('check'); }
+		updateMap();
+	}
+	
+	document.querySelector("#pySlider > div.noUi-pips.noUi-pips-horizontal > div:nth-child(2)").innerHTML = "0";
+	document.querySelector("#householdSlider > div.noUi-pips.noUi-pips-horizontal > div:nth-child(2)").innerHTML = "0";
+	document.querySelector("#yearSlider > div.noUi-pips.noUi-pips-horizontal > div:nth-child(2)").innerHTML = "0";
+	document.querySelector("#realPriceSlider > div.noUi-pips.noUi-pips-horizontal > div:nth-child(2)").innerHTML = "0";
+	document.querySelector("#pyPriceSlider > div.noUi-pips.noUi-pips-horizontal > div:nth-child(2)").innerHTML = "0";
+	document.querySelector("#mPriceSlider > div.noUi-pips.noUi-pips-horizontal > div:nth-child(2)").innerHTML = "0";
+	document.querySelector("#jPriceSlider > div.noUi-pips.noUi-pips-horizontal > div:nth-child(2)").innerHTML = "0";
+	document.querySelector("#gapSlider > div.noUi-pips.noUi-pips-horizontal > div:nth-child(2)").innerHTML = "0";
+	document.querySelector("#jRateSlider > div.noUi-pips.noUi-pips-horizontal > div:nth-child(2)").innerHTML = "0";
+	document.querySelector("#turnoverRateSlider > div.noUi-pips.noUi-pips-horizontal > div:nth-child(2)").innerHTML = "0";
+	document.querySelector("#landAreaSlider > div.noUi-pips.noUi-pips-horizontal > div:nth-child(2)").innerHTML = "0";
+	document.querySelector("#floorAreaSlider > div.noUi-pips.noUi-pips-horizontal > div:nth-child(2)").innerHTML = "0";
+	document.querySelector("#buildingAreaSlider > div.noUi-pips.noUi-pips-horizontal > div:nth-child(2)").innerHTML = "0";
+	

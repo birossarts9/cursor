@@ -1,5 +1,7 @@
 import os
 import sys
+import re
+import csv
 import time
 import random
 import socket
@@ -12,6 +14,29 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 import undetected_chromedriver as uc
+
+try:
+    import winreg  # 윈도우 레지스트리에서 크롬 버전 탐지용 (윈도우 전용)
+except ImportError:
+    winreg = None
+
+
+def get_chrome_main_version():
+    """윈도우 레지스트리에서 설치된 크롬의 메인 버전(정수)을 탐지. 실패 시 None."""
+    if winreg is None:
+        return None
+    reg_path = r"Software\Google\Chrome\BLBeacon"
+    try:
+        reg_key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, reg_path)
+        version, _ = winreg.QueryValueEx(reg_key, "version")
+        return int(version.split('.')[0])
+    except Exception:
+        try:
+            reg_key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, reg_path)
+            version, _ = winreg.QueryValueEx(reg_key, "version")
+            return int(version.split('.')[0])
+        except Exception:
+            return None
 
 # --- [PyQt5 GUI 라이브러리] ---
 try:
@@ -33,13 +58,23 @@ else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 CHECKPOINT_FILE = os.path.join(BASE_DIR, "last_complex_id.txt")
+TOKTOK_LOG_CSV = os.path.join(BASE_DIR, "toktok_log.csv")
+
+# 구글 시트 일괄 업로드 설정
+GSHEET_KEY = "1yEllJWWNwsd5FMvvgwSIvA46j10XU_8MxpRAWcs-ba8"
+GSHEET_TOKTOK_TAB = "Toktok"
+GSHEET_CRED_FILE = os.path.join(BASE_DIR, "service_account_key.json")
+
+# 단지당 탐색할 최상위 매물 카드 최대 개수
+MAX_ITEMS_PER_COMPLEX = 20
 
 # 봇 전용 독립 크롬 프로필 경로.
 # 사용자의 일반 크롬과 user-data-dir을 분리하여 'cannot connect to chrome' 충돌을 원천 차단한다.
 # 최초 1회만 이 프로필 창에서 네이버 로그인을 수동으로 해두면 이후 세션이 유지된다.
 BOT_PROFILE_DIR = os.path.join(BASE_DIR, "chrome_bot_profile")
 CHROME_PROFILE_DIR = "Default"
-CHROME_VERSION_MAIN = 147
+# (백업) 과거 고정값. 이제는 get_chrome_main_version()으로 실제 설치 버전을 동적 탐지한다.
+# CHROME_VERSION_MAIN = 147
 
 # ⚠️ [시뮬레이션 모드] True이면 실제 전송 버튼을 누르지 않고(입력까지만) 짧은 딜레이로 흐름만 검증한다.
 #    실전 발송 시 False로 변경할 것.
@@ -136,13 +171,29 @@ class NaverTalkSender:
         self.log(f"🧩 봇 전용 독립 크롬 프로필 사용: {BOT_PROFILE_DIR}")
         self.log("💡 최초 실행 시, 열린 크롬 창에서 네이버 로그인을 1회 수동으로 진행해 주세요.")
 
+        # 설치된 로컬 크롬 버전을 동적으로 탐지 (크롬 자동 업데이트 대응)
+        current_version = get_chrome_main_version()
+        if current_version:
+            self.log(f"🌐 감지된 로컬 크롬 버전: {current_version}")
+        else:
+            self.log("🌐 로컬 크롬 버전 감지 실패, 기본 설정으로 드라이버 구동을 시도합니다.")
+
+        def build_driver(use_subprocess=False):
+            # 버전 감지 성공 시 동적 주입, 실패 시 version_main 생략(uc 자체 유추)
+            kwargs = {"options": create_options()}
+            if current_version:
+                kwargs["version_main"] = current_version
+            if use_subprocess:
+                kwargs["use_subprocess"] = True
+            return uc.Chrome(**kwargs)
+
         try:
-            driver = uc.Chrome(options=create_options(), version_main=CHROME_VERSION_MAIN)
+            driver = build_driver()
         except Exception as e:
             self.log(f"⚠️ 1차 드라이버 로드 실패, 새 옵션으로 재시도 중... ({e})")
             self.wait_for_internet()
             # 새 ChromeOptions 객체를 다시 생성하여 주입 (객체 재사용 오류 방지)
-            driver = uc.Chrome(options=create_options(), version_main=CHROME_VERSION_MAIN, use_subprocess=True)
+            driver = build_driver(use_subprocess=True)
 
         driver.implicitly_wait(5)
         return driver
@@ -152,24 +203,35 @@ class NaverTalkSender:
     # --------------------------------------------------
     def generate_dynamic_message(self, agent_name, complex_name):
         greetings = [
-            f"안녕하세요 {agent_name} 대표님,",
-            f"{agent_name} 대표님 안녕하세요,",
-            f"바쁘신데 실례합니다 {agent_name}님,",
-            f"{agent_name} 공인중개사님 반갑습니다,",
+            f"안녕하세요, {agent_name} 대표님.",
+            f"{agent_name} 소장님 안녕하세요.",
+            f"반갑습니다, {agent_name} 대표님."
         ]
-        bodies = [
-            f"{complex_name} 매물 보고 연락드립니다. 혹시 지금도 거래 가능한 물건일까요?",
-            f"{complex_name} 단지 매물 관련해서 문의드리고 싶어 톡 남깁니다.",
-            f"{complex_name} 쪽 매물에 관심이 있어서요, 잠깐 여쭤봐도 될까요?",
-            f"{complex_name} 매물 조건이 좋아 보여서 자세히 알아보고 싶습니다.",
-        ]
+        
+        core_message = (
+            "데이터 기반 네이버 부동산 노출 독점 솔루션, 탑랭크 AI 팀입니다.\n\n"
+            "■ 탑랭크 AI 시스템 작동 영상 (3분)\n"
+            "[https://youtu.be/a7zIMFdvaPA?si=JoXBV5ro0J7ho8wn](https://youtu.be/a7zIMFdvaPA?si=JoXBV5ro0J7ho8wn)\n\n"
+            "바쁜 업무 중 네이버 순위 관리까지 신경 쓰느라 지치셨죠?\n"
+            "저희가 수만 건의 데이터를 분석한 결과, 전략 없는 광고는 상위권에 잠깐 머물다 30분~1시간 반 만에 밀려나고 있었습니다. 광고비가 두 시간도 버티지 못하는 상황입니다.\n\n"
+            "■ 핵심은 광고 횟수가 아닌 타이밍입니다\n"
+            "탑랭크 AI는 네이버 부동산을 실시간 모니터링하여 경쟁 부동산이 광고를 마친 마지막 타이밍을 찾아냅니다.\n\n"
+            "- 성과: 과열 시간대 대비 상위권 유지 시간 3~4배 증가 (평균 2~4시간)\n"
+            "- 기준: 새벽 시간을 제외한 의미 있는 시간대 데이터 분석\n\n"
+            "■ 서비스 접속 링크\n"
+            "[https://toprank-ai.com/](https://toprank-ai.com/)\n\n"
+            f"■ {complex_name} 단지 1곳 선착순 독점 안내\n"
+            "무분별한 출혈 경쟁 방지를 위해 동일 단지 내 오직 한 곳의 부동산과만 파트너십을 맺습니다. 대표님께서 먼저 선점하시면 타 부동산은 해당 서비스를 이용할 수 없습니다.\n\n"
+            "현재 2주 무료 체험 기간을 제공하고 있습니다. 체험을 원하시면 편하게 회신 부탁드립니다."
+        )
+
         closings = [
-            "편하실 때 답변 주시면 감사하겠습니다.",
-            "확인 후 회신 부탁드립니다. 감사합니다!",
-            "여유 되실 때 연락 주세요. 좋은 하루 되세요.",
-            "답변 기다리겠습니다. 감사합니다.",
+            "거부를 원하실 경우 말씀해 주시면 즉시 수신거부 처리해 드리겠습니다. 감사합니다.",
+            "더 이상 안내를 원치 않으시면 회신 부탁드립니다. 감사합니다.",
+            "수신 거부를 원하시면 편하게 말씀해 주세요. 감사합니다."
         ]
-        return f"{random.choice(greetings)}\n{random.choice(bodies)}\n{random.choice(closings)}"
+
+        return f"{random.choice(greetings)}\n\n{core_message}\n\n{random.choice(closings)}"
 
     # --------------------------------------------------
     # 선행 로그인 검증 (루프 진입 전 반드시 로그인 완료 대기)
@@ -256,6 +318,9 @@ class NaverTalkSender:
 
             self.save_checkpoint(c_id)
 
+        # [요구사항 4] 작업 종료/중단 시 누적 CSV를 구글 시트로 일괄 업로드
+        self.upload_to_google_sheets()
+
         if self.driver:
             try:
                 self.driver.quit()
@@ -314,14 +379,23 @@ class NaverTalkSender:
 
         main_window = self.driver.current_window_handle
 
+        processed_items_count = 0
         for item in items:
             if not self.is_running:
                 break
             if self.send_count >= DAILY_SEND_LIMIT:
                 break
 
+            # [매물 탐색 제한] 단독/묶음 상관없이 최상위 카드 20개까지만 검사하고 다음 단지로
+            if processed_items_count >= MAX_ITEMS_PER_COMPLEX:
+                self.log(f"   [탐색 제한] 매물 {MAX_ITEMS_PER_COMPLEX}개를 모두 검사하여 다음 단지로 이동합니다.")
+                break
+            processed_items_count += 1
+
             try:
+                self.driver.implicitly_wait(0)
                 multicp = item.find_elements(By.CSS_SELECTOR, ".label--multicp")
+                self.driver.implicitly_wait(5)
                 if not multicp:
                     # [케이스 A] 단독 매물
                     self._handle_single_item(item, complex_name, main_window)
@@ -356,15 +430,19 @@ class NaverTalkSender:
         # 사전 필터링: 아실 제공 매물은 클릭 시 외부 리다이렉트되므로 건너뜀
         if self._is_asil(item):
             self.log("   [아실 패스] 외부 리다이렉트 방지를 위해 건너뜁니다.")
+            self.save_to_csv(complex_name, "", "아실패스")
             time.sleep(0.1)
             return
 
         # 사전 중복 필터: 클릭 전 좌측 카드 텍스트로 이미 처리한 중개사면 패널 오픈 생략
-        card_text = item.text
-        if any(r_name in card_text for r_name in self.processed_realtors if r_name):
+        if self._is_precheck_duplicate(item.text):
             self.log("   [사전 중복 건너뛰기] 우측 패널 오픈 생략")
+            self.save_to_csv(complex_name, "", "사전중복")
             time.sleep(0.1)
             return
+
+        # 사람다운 활동 패턴: 클릭 전 간헐적 더미 스크롤
+        self._human_dummy_scroll()
 
         if not self._open_detail_pane(item):
             time.sleep(0.1)
@@ -377,6 +455,9 @@ class NaverTalkSender:
     # [케이스 B] 묶음 매물 처리 (하위 경쟁사 전수 순회)
     # --------------------------------------------------
     def _handle_bundle_item(self, item, multicp_btn, complex_name, main_window):
+        # 사람다운 활동 패턴: 묶음 펼치기 전 간헐적 더미 스크롤
+        self._human_dummy_scroll()
+
         # 묶음 버튼 클릭 -> 하위 리스트 펼치기
         self.driver.execute_script("arguments[0].click();", multicp_btn)
         time.sleep(1.5)
@@ -393,15 +474,19 @@ class NaverTalkSender:
             # 사전 필터링: 하위 카드도 아실 제공이면 건너뜀
             if self._is_asil(child_item):
                 self.log("   [아실 패스] 외부 리다이렉트 방지를 위해 건너뜁니다.")
+                self.save_to_csv(complex_name, "", "아실패스")
                 time.sleep(0.1)
                 continue
 
             # 사전 중복 필터: 클릭 전 하위 카드 텍스트로 이미 처리한 중개사면 패널 오픈 생략
-            card_text = child_item.text
-            if any(r_name in card_text for r_name in self.processed_realtors if r_name):
+            if self._is_precheck_duplicate(child_item.text):
                 self.log("   [사전 중복 건너뛰기] 우측 패널 오픈 생략")
+                self.save_to_csv(complex_name, "", "사전중복")
                 time.sleep(0.1)
                 continue
+
+            # 사람다운 활동 패턴: 클릭 전 간헐적 더미 스크롤
+            self._human_dummy_scroll()
 
             if not self._open_detail_pane(child_item):
                 time.sleep(0.1)
@@ -418,6 +503,30 @@ class NaverTalkSender:
             return "아실 제공" in element.text
         except Exception:
             return False
+
+    def _human_dummy_scroll(self):
+        """사람다운 활동 패턴: 30% 확률로 화면을 무작위 위/아래로 스크롤하는 더미 액션."""
+        if random.random() < 0.3:
+            try:
+                offset = random.choice([-400, -250, 200, 350, 500])
+                self.driver.execute_script(f"window.scrollBy(0, {offset});")
+                time.sleep(random.uniform(0.3, 0.9))
+            except Exception:
+                pass
+
+    def _is_precheck_duplicate(self, card_text):
+        """좌측 카드 텍스트(말줄임 가능)에서 이미 처리한 중개사인지 핵심 상호명으로 사전 판별."""
+        card_text_clean = card_text.replace(" ", "")
+        for r_name in self.processed_realtors:
+            if not r_name:
+                continue
+            core_name = re.sub(
+                r'공인중개사사무소|공인중개사|부동산중개법인주식회사|부동산중개법인|부동산중개|부동산',
+                '', r_name
+            ).strip()[:8]
+            if core_name and core_name.replace(" ", "") in card_text_clean:
+                return True
+        return False
 
     def _open_detail_pane(self, element):
         """카드의 제목 텍스트 영역을 클릭해 우측 상세 패널을 연다. 성공 시 True."""
@@ -483,22 +592,27 @@ class NaverTalkSender:
             # 상호명 검증: 빈 값/파싱 실패면 세트 오염 방지를 위해 등록하지 않고 종료
             if not agent_name:
                 self.log("   [파싱 실패] 중개사 상호명을 찾지 못해 건너뜁니다.")
+                self.save_to_csv(complex_name, "", "파싱실패")
                 return "error"
 
             # 중복 검사
             if agent_name in self.processed_realtors:
                 self.log(f"   [중복 건너뛰기] {agent_name}")
+                self.save_to_csv(complex_name, agent_name, "중복")
                 return "duplicate"
 
             # 버튼 검사: 톡톡 버튼이 없으면 세트에 추가 후 종료
+            self.driver.implicitly_wait(0)
             talk_buttons = self.driver.find_elements(
                 By.CSS_SELECTOR, ".table_td_agent a.btn_contact--talk"
             )
+            self.driver.implicitly_wait(5)
             if len(talk_buttons) <= 0:
                 self.log(f"   [버튼 없음] {agent_name}")
                 self.processed_realtors.add(agent_name)
                 NaverTalkSender.total_scanned_realtors += 1
                 NaverTalkSender.talk_disabled_count += 1
+                self.save_to_csv(complex_name, agent_name, "버튼없음")
                 return "no_button"
 
             # 여기까지 통과 = 최초로 확인한 '톡톡 사용' 중개사
@@ -510,7 +624,9 @@ class NaverTalkSender:
 
             if success:
                 self.processed_realtors.add(agent_name)
+                self.save_to_csv(complex_name, agent_name, "발송성공")
                 return "sent"
+            self.save_to_csv(complex_name, agent_name, "발송실패")
             return "failed"
 
         except Exception:
@@ -612,6 +728,61 @@ class NaverTalkSender:
         end_at = time.monotonic() + seconds
         while self.is_running and time.monotonic() < end_at:
             time.sleep(min(2.0, end_at - time.monotonic()))
+
+    # --------------------------------------------------
+    # [요구사항 4] 로컬 CSV 기록 + 구글 시트 일괄 업로드
+    # --------------------------------------------------
+    def save_to_csv(self, complex_name, agent_name, status):
+        """매 건 처리 결과를 toktok_log.csv에 누적 저장. (컬럼: 수집일시, 단지명, 중개사명, 발송상태)"""
+        try:
+            file_exists = os.path.exists(TOKTOK_LOG_CSV)
+            with open(TOKTOK_LOG_CSV, "a", newline="", encoding="utf-8-sig") as f:
+                writer = csv.writer(f)
+                if not file_exists:
+                    writer.writerow(["수집일시", "단지명", "중개사명", "발송상태"])
+                writer.writerow([
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    complex_name, agent_name, status
+                ])
+        except Exception as e:
+            self.log(f"   ⚠️ CSV 기록 실패: {e}")
+
+    def upload_to_google_sheets(self):
+        """작업 종료/중단 시 toktok_log.csv 데이터를 구글 시트 Toktok 탭에 일괄 추가하고 CSV를 백업."""
+        if not os.path.exists(TOKTOK_LOG_CSV):
+            self.log("ℹ️ 업로드할 toktok_log.csv가 없습니다.")
+            return
+
+        try:
+            import gspread
+            from google.oauth2.service_account import service_account_key
+
+            scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+            creds = service_account_key.from_service_account_file(GSHEET_CRED_FILE, scopes=scopes)
+            client = gspread.authorize(creds)
+            sheet = client.open_by_key(GSHEET_KEY).worksheet(GSHEET_TOKTOK_TAB)
+
+            with open(TOKTOK_LOG_CSV, "r", encoding="utf-8-sig") as f:
+                all_rows = list(csv.reader(f))
+
+            # 헤더 제외한 데이터 행만 추출
+            data_rows = all_rows[1:] if all_rows and all_rows[0][:1] == ["수집일시"] else all_rows
+            if not data_rows:
+                self.log("ℹ️ 업로드할 신규 로그 데이터가 없습니다.")
+                return
+
+            sheet.append_rows(data_rows, value_input_option="USER_ENTERED")
+            self.log(f"☁️ 구글 시트(Toktok) 업로드 완료: {len(data_rows)}건")
+
+            # 중복 업로드 방지를 위해 CSV를 날짜 백업본으로 이름 변경
+            backup_base = f"toktok_log_{datetime.now().strftime('%Y%m%d')}"
+            backup_name = os.path.join(BASE_DIR, backup_base + ".csv")
+            if os.path.exists(backup_name):
+                backup_name = os.path.join(BASE_DIR, f"{backup_base}_{datetime.now().strftime('%H%M%S')}.csv")
+            os.rename(TOKTOK_LOG_CSV, backup_name)
+            self.log(f"🗂️ CSV 백업 완료: {os.path.basename(backup_name)}")
+        except Exception as e:
+            self.log(f"❌ 구글 시트 업로드 실패 (CSV는 보존됨): {e}")
 
 
 # ======================================================
