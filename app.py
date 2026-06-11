@@ -57,6 +57,47 @@ def log_user_action(action_detail: str) -> None:
         writer.writerow([now_str, client_id, action_detail])
 
 
+def send_slack_payment_alert(client_id: str, realtor_name: str, payment_type: str) -> None:
+    """결제 버튼 클릭 시 슬랙 웹훅으로 실시간 알림 발송 (정기/일반 구분)."""
+    import json
+    import urllib.request
+
+    url_file = os.path.join(BASE_DIR, "slack_webhook.txt")
+    if not os.path.exists(url_file):
+        print("Error: slack_webhook.txt 파일을 찾을 수 없습니다.")
+        return
+    try:
+        with open(url_file, "r", encoding="utf-8") as f:
+            url = f.read().strip()
+    except OSError as e:
+        print(f"Error: slack_webhook.txt 읽기 실패: {e}")
+        return
+    if not url:
+        print("Error: slack_webhook.txt에 웹훅 URL이 비어 있습니다.")
+        return
+
+    emoji = "🔥" if payment_type == "정기 결제 신청" else "💳"
+    payload = {
+        "text": (
+            f"{emoji} [탑랭크 AI] 신규 결제 액션 감지!\n"
+            f"- **고객 ID**: {client_id}\n"
+            f"- **부동산 상호**: {realtor_name}\n"
+            f"- **유형**: {payment_type} 버튼 클릭 완료 🚀"
+        )
+    }
+    try:
+        headers = {"Content-Type": "application/json"}
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=5)
+    except Exception as e:
+        print(f"Slack webhook error: {e}")
+
+
 # 엑셀 열 인덱스(0-based): N열 = CP사 — 멀티 CP 광고 핑퐁 노이즈 방지용 식별자
 COL_CP = 13
 
@@ -2568,6 +2609,64 @@ def main() -> None:
                 st.error(f"🛑 이용 기간 만료\n\n**종료일:** {expire_date}\n\n체험단 이용 기간이 만료되었습니다. 서비스를 연장하려면 월 결제가 필요합니다.")
                 st.stop()  # 만료 유저 대시보드 화면 연산 원천 차단
 
+            st.divider()
+            st.markdown(
+                "<p style='font-size:0.82rem; font-weight:700; color:#1E293B; "
+                "margin:0 0 8px 0;'>📢 프리미엄 연장 신청</p>",
+                unsafe_allow_html=True,
+            )
+
+            sidebar_id = st.query_params.get("id", "직접접속")
+            _sidebar_qr_path = os.path.join(BASE_DIR, "qrcode.png")
+
+            side_btn_l, side_btn_r = st.columns(2, gap="small")
+            with side_btn_l:
+                if st.button(
+                    "정기 결제 신청",
+                    use_container_width=True,
+                    type="primary",
+                    key="side_regular_btn",
+                ):
+                    send_slack_payment_alert(sidebar_id, filter_realtor_name, "사이드바_정기 결제 신청")
+                    log_user_action("5. 사이드바 정기 결제 신청 클릭")
+                    st.sidebar.success("✅ 정기 신청 접수 완료!")
+            with side_btn_r:
+                if st.button(
+                    "일반 카드 결제(9,900원)",
+                    use_container_width=True,
+                    key="side_general_btn",
+                ):
+                    send_slack_payment_alert(sidebar_id, filter_realtor_name, "사이드바_일반 카드 결제")
+                    log_user_action("6. 사이드바 일반 카드 결제 클릭")
+                    pay_url = "https://www.payapp.kr/L/z4fm13"
+                    js = f"window.open('{pay_url}')"
+                    components.html(f"<script>{js}</script>", height=0)
+
+            with st.expander("간편 QR/계좌 결제", expanded=False):
+                st.markdown(
+                    "<p style='font-size:0.72rem; color:#64748B; margin:0 0 6px 0;'>"
+                    "스마트폰 QR 스캔 또는 계좌 이체</p>",
+                    unsafe_allow_html=True,
+                )
+                if os.path.exists(_sidebar_qr_path):
+                    st.image(_sidebar_qr_path, width=100)
+                    st.markdown(
+                        "<p style='font-size:0.68rem; color:#94A3B8; text-align:center; "
+                        "margin:2px 0 0 0;'>스캔 후 결제</p>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.markdown(
+                        "<p style='font-size:0.72rem; color:#94A3B8; margin:0;'>QR 이미지 미검출</p>",
+                        unsafe_allow_html=True,
+                    )
+                st.markdown(
+                    "<p style='font-size:0.72rem; color:#475569; margin:8px 0 0 0; line-height:1.45;'>"
+                    "기업은행 174-117603-01-012 "
+                    "<span style='color:#2563EB; font-weight:600;'>신성우</span></p>",
+                    unsafe_allow_html=True,
+                )
+
         display_realtor = filter_realtor_name
         raw_df = load_server_data()
         if raw_df is None:
@@ -3349,50 +3448,129 @@ def main() -> None:
             st.write("")
             st.divider()
 
-            # 4. [하단 레이어] 프리미엄 요금 카드 — Markdown 들여쓰기 코드블록 깨짐 방지 위해 iframe HTML 사용
-            _premium_card_html = """
-<style>
-body { margin: 0; font-family: sans-serif; }
-</style>
-<div style="
-  background-color: #ffffff;
-  padding: 30px;
-  border-radius: 12px;
-  border: 2px solid #2563eb;
-  box-shadow: 0 4px 20px rgba(37, 99, 235, 0.15);
-  text-align: center;
-  margin: 8px auto 0 auto;
-  max-width: 800px;
-">
-  <span style="
-    background-color: #eff6ff;
-    color: #1e40af;
-    font-size: 0.8rem;
-    font-weight: 700;
-    padding: 5px 16px;
-    border-radius: 50px;
-    border: 1px solid #bfdbfe;
-    display: inline-block;
-  ">PREMIUM SERVICE</span>
-  <h2 style="margin: 15px 0 10px 0; color: #1e293b; font-size: 1.5rem; font-weight: 700;">🚀 탑랭크 AI 프리미엄 서비스 도입 비용</h2>
-  <h1 style="color: #2563eb; font-size: 3rem; margin: 10px 0; font-weight: 800;">단지 별 10,000원</h1>
-  <p style="color: #475569; font-size: 1rem; line-height: 1.7; margin-bottom: 25px; font-weight: 500;">
-    하루 커피 한 잔 값으로 우리 단지 내 <b>최상위 노출 점유율을 독점</b>하고,<br>
-    소모적인 상단 갱신 경쟁과 불필요한 광고 스트레스에서 영원히 해방되세요!
-  </p>
-  <div style="
-    background-color: #f8fafc;
-    padding: 12px 24px;
-    border-radius: 8px;
-    border: 1px dashed #cbd5e1;
-    display: inline-block;
-  ">
-    <span style="color: #64748b; font-size: 0.85rem; display: block; margin-bottom: 4px; font-weight: 600;">💳 이용대금 납부 계좌</span>
-    <strong style="color: #0f172a; font-size: 1.15rem; letter-spacing: 0.5px;">기업은행 174-117603-01-012 <span style="color: #2563eb; font-weight: 700;">신성우</span></strong>
-  </div>
-</div>
-"""
-            components.html(_premium_card_html.strip(), height=430, scrolling=False)
+            with st.container(border=True):
+                st.markdown(
+                    """
+                    <div style="text-align:center; padding:12px 8px 20px 8px;
+                      border-bottom:1px solid #E2E8F0; margin-bottom:4px;">
+                      <span style="display:inline-block; background:#EFF6FF; color:#2563EB;
+                        font-size:0.72rem; font-weight:700; letter-spacing:0.1em;
+                        padding:5px 16px; border-radius:20px; border:1px solid #BFDBFE;">
+                        PREMIUM SERVICE
+                      </span>
+                      <p style="font-size:1.05rem; font-weight:700; color:#1E293B;
+                        margin:14px 0 0 0;">🚀 탑랭크 AI 프리미엄 서비스 도입</p>
+                      <h1 style="color:#2563EB; font-size:3.6rem; margin:8px 0 6px 0;
+                        font-weight:900; letter-spacing:-0.03em; line-height:1.1;">월 9,900원</h1>
+                      <p style="color:#475569; font-size:0.95rem; font-weight:500; margin:0;
+                        line-height:1.55;">
+                        우리 단지 내 <b>최상위 노출 점유율을 독점</b>하고<br>
+                        광고 스트레스에서 영원히 해방되세요
+                      </p>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+                current_id = st.query_params.get("id", "직접접속")
+                _main_qr_path = os.path.join(BASE_DIR, "qrcode.png")
+
+                st.markdown(
+                    """
+                    <div style="background:#F0F7FF; border:1px solid #DBEAFE; border-radius:10px;
+                      padding:16px 18px 10px 18px; margin:8px 0 10px 0;">
+                      <p style="font-size:0.72rem; font-weight:700; color:#2563EB;
+                        margin:0 0 4px 0; letter-spacing:0.06em;">방법 1</p>
+                      <p style="font-size:1rem; font-weight:700; color:#1E293B; margin:0 0 6px 0;">
+                        정기 결제 자동 이체
+                      </p>
+                      <p style="font-size:0.86rem; color:#64748B; margin:0; line-height:1.5;">
+                        결제창 이동 없이 신청 즉시 담당자가 전화로 정기 결제 세팅을 도와드립니다.
+                      </p>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                if st.button(
+                    "정기 결제 신청하기",
+                    use_container_width=True,
+                    type="primary",
+                    key="main_regular_btn",
+                ):
+                    send_slack_payment_alert(current_id, display_realtor, "정기 결제 신청")
+                    log_user_action("3. 월 9,900원 정기 결제 신청 버튼 클릭")
+                    st.success("✅ 정기 결제 신청이 실시간 접수되었습니다! 담당자가 곧 안내 전화를 드립니다.")
+
+                st.markdown(
+                    """
+                    <div style="background:#FAFAFA; border:1px solid #E2E8F0; border-radius:10px;
+                      padding:16px 18px 12px 18px; margin:18px 0 0 0;">
+                      <p style="font-size:0.72rem; font-weight:700; color:#64748B;
+                        margin:0 0 4px 0; letter-spacing:0.06em;">방법 2</p>
+                      <p style="font-size:1rem; font-weight:700; color:#1E293B; margin:0;">
+                        일반 단건 결제 및 QR 입금
+                      </p>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+                col_pay_text, col_pay_qr = st.columns([1.5, 1], gap="medium")
+                with col_pay_text:
+                    st.markdown(
+                        "<p style='font-size:0.88rem; color:#475569; margin:10px 0 14px 0; "
+                        "line-height:1.55;'>카드·모바일 페이 결제는 아래 버튼을 이용해 주세요.</p>",
+                        unsafe_allow_html=True,
+                    )
+                    if st.button(
+                        "일반 카드 결제",
+                        use_container_width=True,
+                        key="main_general_btn",
+                    ):
+                        send_slack_payment_alert(current_id, display_realtor, "일반 카드 결제")
+                        log_user_action("4. 일반 카드 결제 버튼 클릭")
+                        pay_url = "https://www.payapp.kr/L/z4fm13"
+                        js = f"window.open('{pay_url}')"
+                        components.html(f"<script>{js}</script>", height=0)
+                        st.success("✅ 일반 결제 페이지로 이동합니다.")
+
+                with col_pay_qr:
+                    st.markdown(
+                        "<div style='margin-top:10px; display:flex; flex-direction:column; "
+                        "align-items:center; justify-content:flex-start;'>",
+                        unsafe_allow_html=True,
+                    )
+                    if os.path.exists(_main_qr_path):
+                        st.image(_main_qr_path, width=140)
+                        st.markdown(
+                            "<p style='font-size:0.7rem; color:#94A3B8; text-align:center; "
+                            "margin:2px 0 0 0;'>스마트폰 스캔 결제</p></div>",
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        st.markdown(
+                            "<p style='font-size:0.78rem; color:#94A3B8; text-align:center; "
+                            "margin:20px 0 0 0;'>QR 이미지 미검출</p></div>",
+                            unsafe_allow_html=True,
+                        )
+
+                st.markdown(
+                    """
+                    <div style="text-align:center; background:#F8FAFC; padding:10px 16px;
+                      border-radius:8px; border:1px solid #E2E8F0; max-width:520px;
+                      margin:20px auto 4px auto;">
+                      <span style="color:#64748B; font-size:0.76rem; font-weight:600;">
+                        🛡️ 무통장 입금 안내
+                      </span>
+                      <p style="color:#0F172A; font-size:0.92rem; margin:4px 0 0 0;
+                        letter-spacing:0.3px;">
+                        기업은행 174-117603-01-012
+                        <span style="color:#2563EB; font-weight:700;">신성우</span>
+                      </p>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
 
 if __name__ == "__main__":
     main()
